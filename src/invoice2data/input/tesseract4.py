@@ -54,7 +54,11 @@ def to_text(path, language='fra'):
             '0',
             '-sharpen',
             '0x1',
-            'png:-',
+            '-density', 
+            '350', 
+            '-depth', 
+            '8',
+            'tiff:-',
         ]
 
         p1 = subprocess.Popen(magick_cmd, stdout=subprocess.PIPE)

@@ -32,7 +32,7 @@ def to_text(path, language='fra'):
             'gs',
             '-q',
             '-dNOPAUSE',
-            '-r350x350',
+            '-r400x400',
             '-sDEVICE=tiff24nc',
             '-sOutputFile=' + tf.name,
             path,
@@ -58,7 +58,7 @@ def to_text(path, language='fra'):
             '350', 
             '-depth', 
             '8',
-            'png:-',
+            'tiff:-',
         ]
 
         p1 = subprocess.Popen(magick_cmd, stdout=subprocess.PIPE)

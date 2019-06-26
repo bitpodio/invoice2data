@@ -32,7 +32,7 @@ def to_text(path, language='fra'):
             'gs',
             '-q',
             '-dNOPAUSE',
-            '-r400x400',
+            '-r600x600',
             '-sDEVICE=tiff24nc',
             '-sOutputFile=' + tf.name,
             path,

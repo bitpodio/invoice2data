@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-def to_text(path, language='eng'):
+def to_text(path, language='eng', psm='6'):
     """Wraps Tesseract 4 OCR with custom language model.
 
     Parameters
@@ -63,7 +63,7 @@ def to_text(path, language='eng'):
 
         p1 = subprocess.Popen(magick_cmd, stdout=subprocess.PIPE)
 
-        tess_cmd = ['tesseract', '-l', language, '--oem', '1', '--psm', '3', 'stdin', 'stdout']
+        tess_cmd = ['tesseract', '-l', language, '--oem', '1', '--psm', psm, 'stdin', 'stdout']
         p2 = subprocess.Popen(tess_cmd, stdin=p1.stdout, stdout=subprocess.PIPE)
 
         out, err = p2.communicate()

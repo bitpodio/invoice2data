@@ -32,7 +32,7 @@ def to_text(path, language='eng', psm='6'):
             'gs',
             '-q',
             '-dNOPAUSE',
-            '-r600x600',
+            '-r2000x2000',
             '-sDEVICE=tiff24nc',
             '-sOutputFile=' + tf.name,
             path,
@@ -54,10 +54,6 @@ def to_text(path, language='eng', psm='6'):
             '0',
             '-sharpen',
             '0x1',
-            '-density', 
-            '350', 
-            '-depth', 
-            '8',
             'tiff:-',
         ]
 

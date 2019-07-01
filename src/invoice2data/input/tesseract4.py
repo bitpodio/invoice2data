@@ -32,7 +32,7 @@ def to_text(path, language='eng', psm='6'):
             'gs',
             '-q',
             '-dNOPAUSE',
-            '-r2000x2000',
+            '-r600x600',
             '-sDEVICE=tiff24nc',
             '-sOutputFile=' + tf.name,
             path,
@@ -45,21 +45,32 @@ def to_text(path, language='eng', psm='6'):
         # Step 2: Enhance TIFF
         magick_cmd = [
             'convert',
+            '-density', 
+            '350',
             tf.name,
             '-colorspace',
             'gray',
+            '-alpha', 
+            'off',
             '-type',
             'grayscale',
             '-contrast-stretch',
             '0',
             '-sharpen',
             '0x1',
-            'tiff:-',
+            '-filter', 
+            'Box', 
+            '-resize',
+            '250%',
+            '-depth',
+            '8',
+            'tiff:-'
         ]
 
         p1 = subprocess.Popen(magick_cmd, stdout=subprocess.PIPE)
 
-        tess_cmd = ['tesseract', '-l', language, '--oem', '1', '--psm', psm, 'stdin', 'stdout']
+        tess_cmd = ['tesseract', '-l', language, '--oem', '1', '--psm', psm, '--user-patterns', 
+        '/Developer/bitpod/invoice2data/src/invoice2data/input/user_pettern.txt',  'stdin', 'stdout']
         p2 = subprocess.Popen(tess_cmd, stdin=p1.stdout, stdout=subprocess.PIPE)
 
         out, err = p2.communicate()

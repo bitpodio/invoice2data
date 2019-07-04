@@ -32,6 +32,23 @@ input_mapping = {
 
 output_mapping = {'csv': to_csv, 'json': to_json, 'xml': to_xml, 'none': None}
 
+def get_parsed_data(templates, extracted_str):    
+    logger.debug('START pdftotext result ===========================')
+    logger.debug(extracted_str)
+    logger.debug('END pdftotext result =============================')
+
+    if templates is None:
+        templates = read_templates()
+        
+    logger.debug('Testing {} template files'.format(len(templates)))
+    for t in templates:
+        optimized_str = t.prepare_input(extracted_str)
+
+        if t.matches_input(optimized_str):
+            return t.extract(optimized_str)
+
+    return False
+
 
 def extract_data(invoicefile, templates=None, input_module=pdftotext):
     """Extracts structured data from PDF/image invoices.
@@ -75,25 +92,21 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
      'currency': 'INR', 'desc': 'Invoice IBZY2087 from OYO'}
 
     """
-    if templates is None:
-        templates = read_templates()
-
-    # print(templates[0])
+    # TRY 1
+    # extract data with given input_module
     extracted_str = input_module.to_text(invoicefile).decode('utf-8')
+    parsed_data = get_parsed_data(templates, extracted_str)
 
-    logger.debug('START pdftotext result ===========================')
-    logger.debug(extracted_str)
-    logger.debug('END pdftotext result =============================')
+    if parsed_data != False and parsed_data != None:
+        return parsed_data
+    logger.error('No template for %s.', invoicefile)
 
-    logger.debug('Testing {} template files'.format(len(templates)))
-    for t in templates:
-        optimized_str = t.prepare_input(extracted_str)
-
-        if t.matches_input(optimized_str):
-            return t.extract(optimized_str)
-
-    logger.error('No template for %s', invoicefile)
-    return False
+    # TRY 2
+    if input_module == tesseract4:
+        logger.debug('Retrying with psm value of 3.')
+        extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
+        return get_parsed_data(templates, extracted_str)
+    
 
 
 def create_parser():

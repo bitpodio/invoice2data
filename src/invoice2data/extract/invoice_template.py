@@ -9,7 +9,7 @@ import dateparser
 from unidecode import unidecode
 import logging as logger
 from collections import OrderedDict
-from .plugins import lines, tables
+from .plugins import lines, tables, multilines
 
 OPTIONS_DEFAULT = {
     'remove_whitespace': False,
@@ -22,7 +22,7 @@ OPTIONS_DEFAULT = {
     'replace': [],  # example: see templates/fr/fr.free.mobile.yml
 }
 
-PLUGIN_MAPPING = {'lines': lines, 'tables': tables}
+PLUGIN_MAPPING = {'lines': lines, 'tables': tables, 'multilines': multilines}
 
 
 class InvoiceTemplate(OrderedDict):

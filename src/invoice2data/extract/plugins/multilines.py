@@ -22,7 +22,7 @@ def extract(self, content, output):
     assert 'end' in self['multilines'], 'Multilines end regex missing'
     assert 'line' in self['multilines'], 'Multilines line regex missing'
     assert 'first_line' in self['multilines'], 'Multilines first_line regex missing'
-
+    
     start = re.search(self['multilines']['start'], content)
     end = re.search(self['multilines']['end'], content)
     if not start or not end:
@@ -50,12 +50,14 @@ def extract(self, content, output):
         
         # match the other lines
         for lineRegEx in self['multilines']['line']:
+            if not lineRegEx:
+                continue
             match = re.search(lineRegEx, line)
             if match:
                 for field, value in match.groupdict().items():
                     current_row[field] = '%s%s%s' % (
                         current_row.get(field, ''),
-                        current_row.get(field, '') and '\n' or '',
+                        current_row.get(field, '') and ' ' or '',
                         value.strip() if value else '',
                     )
                 break

@@ -32,7 +32,7 @@ input_mapping = {
 
 output_mapping = {'csv': to_csv, 'json': to_json, 'xml': to_xml, 'none': None}
 
-def get_parsed_data(templates, extracted_str):    
+def get_parsed_data(templates, extracted_str, partiallyExtracted):    
     logger.debug('START pdftotext result ===========================')
     logger.debug(extracted_str)
     logger.debug('END pdftotext result =============================')
@@ -45,7 +45,7 @@ def get_parsed_data(templates, extracted_str):
         optimized_str = t.prepare_input(extracted_str)
 
         if t.matches_input(optimized_str):
-            return t.extract(optimized_str)
+            return t.extract(optimized_str, partiallyExtracted)
 
     return False
 
@@ -92,12 +92,13 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
      'currency': 'INR', 'desc': 'Invoice IBZY2087 from OYO'}
 
     """
+    partiallyExtracted = False
     # TRY 1
     # extract data with given input_module
     extracted_str = input_module.to_text(invoicefile).decode('utf-8')
-    parsed_data = get_parsed_data(templates, extracted_str)
+    parsed_data = get_parsed_data(templates, extracted_str, partiallyExtracted)
 
-    if parsed_data != False and parsed_data != None:
+    if (parsed_data != False and parsed_data != None and 'multilines' in parsed_data) or input_module != tesseract4:
         return parsed_data
     logger.error('No template for %s.', invoicefile)
 
@@ -105,7 +106,7 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
     if input_module == tesseract4:
         logger.debug('Retrying with psm value of 3.')
         extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
-        return get_parsed_data(templates, extracted_str)
+        return get_parsed_data(templates, extracted_str, partiallyExtracted)
     
 
 

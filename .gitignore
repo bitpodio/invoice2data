@@ -64,3 +64,6 @@ target/
 # PyTest
 .pytest_cache/
 
+invoices-output.json
+.vscode/
+playground/

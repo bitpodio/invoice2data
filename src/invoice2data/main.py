@@ -13,6 +13,7 @@ from .input import pdfminer_wrapper
 from .input import tesseract
 from .input import tesseract4
 from .input import gvision
+from .file_transfer import file_transfer
 
 from invoice2data.extract.loader import read_templates
 

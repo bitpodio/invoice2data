@@ -6,6 +6,7 @@ import shutil
 import os
 from os.path import join
 import logging
+import json
 
 from .input import pdftotext
 from .input import pdfminer_wrapper
@@ -18,6 +19,7 @@ from invoice2data.extract.loader import read_templates
 from .output import to_csv
 from .output import to_json
 from .output import to_xml
+from .output import to_model
 
 
 logger = logging.getLogger(__name__)
@@ -99,6 +101,7 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
     parsed_data = get_parsed_data(templates, extracted_str, partiallyExtracted)
 
     if (parsed_data != False and parsed_data != None and 'multilines' in parsed_data) or input_module != tesseract4:
+        parsed_data['rawData'] = extracted_str
         return parsed_data
     logger.error('No template for %s.', invoicefile)
 
@@ -106,7 +109,9 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
     if input_module == tesseract4:
         logger.debug('Retrying with psm value of 3.')
         extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
-        return get_parsed_data(templates, extracted_str, partiallyExtracted)
+        parsed_data = get_parsed_data(templates, extracted_str, partiallyExtracted)
+        parsed_data['rawData'] = extracted_str
+        return parsed_data
     
 
 
@@ -120,14 +125,14 @@ def create_parser():
     parser.add_argument(
         '--input-reader',
         choices=input_mapping.keys(),
-        default='pdftotext',
-        help='Choose text extraction function. Default: pdftotext',
+        default='tesseract4',
+        help='Choose text extraction function. Default: tesseract4',
     )
 
     parser.add_argument(
         '--output-format',
         choices=output_mapping.keys(),
-        default='none',
+        default='json',
         help='Choose output format. Default: none',
     )
 
@@ -166,6 +171,7 @@ def create_parser():
              'Default: "{date} {invoice_number} {desc}.pdf"',
     )
 
+    # read templates from attachments
     parser.add_argument(
         '--template-folder',
         '-t',
@@ -173,16 +179,9 @@ def create_parser():
         help='Folder containing invoice templates in yml file. Always adds built-in templates.',
     )
 
-    parser.add_argument(
-        '--exclude-built-in-templates',
-        dest='exclude_built_in_templates',
-        default=False,
-        help='Ignore built-in templates.',
-        action="store_true",
-    )
 
     parser.add_argument(
-        'input_files', type=argparse.FileType('r'), nargs='+', help='File or directory to analyze.'
+        '--input-files', dest='input_files',type=argparse.FileType('r'), nargs='+', help='File or directory to analyze.'
     )
 
     return parser
@@ -203,15 +202,27 @@ def main(args=None):
     output_module = output_mapping[args.output_format]
 
     templates = []
-    # Load templates from external folder if set.
-    if args.template_folder:
-        templates += read_templates(os.path.abspath(args.template_folder))
+    
+    # Download templates
+    logger.debug('******* Download Templates ********')
+    templateIds = os.environ['templates'].split(',')
+    template_folder = (args.template_folder and os.path.abspath(args.template_folder)) or os.path.abspath('downloads/templates')
+    for templateId in templateIds:
+        file_transfer.downloadFile(templateId, template_folder, '.yml')
 
-    # Load internal templates, if not disabled.
-    if not args.exclude_built_in_templates:
-        templates += read_templates()
+    if template_folder:
+        templates += read_templates(template_folder)
+
+    # download PDF
+    logger.debug('******* Download PDF ********')
+    input_files = (args.input_files and os.path.abspath(args.input_files)) or os.path.abspath('downloads')
+    pdfId = os.environ['pdfId']
+    downloaded_file = file_transfer.downloadFile(pdfId, input_files, '.pdf')
+
+    # process downloaded PDF 
     output = []
-    for f in args.input_files:
+    rawData = ''
+    with open(downloaded_file, 'r') as f:
         res = extract_data(f.name, templates=templates, input_module=input_module)
         if res:
             logger.info(res)
@@ -229,11 +240,13 @@ def main(args=None):
                     invoice_number=res['invoice_number'],
                     desc=res['desc'],
                 )
-                shutil.move(f.name, join(args.move, filename))
-        f.close()
-
+                shutil.move(f.name, join(args.move, filename))          
+    api = os.environ['outputModelAPI']
+    dataColumn = os.environ['outputColumn']
     if output_module is not None:
         output_module.write_to_file(output, args.output_name, args.output_date_format)
+        to_model.write_to_model(output, api, dataColumn, args.output_date_format)
+
 
 
 if __name__ == '__main__':

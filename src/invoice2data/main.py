@@ -7,23 +7,51 @@ import os
 from os.path import join
 import logging
 import json
-
-from .input import pdftotext
-from .input import pdfminer_wrapper
-from .input import tesseract
-from .input import tesseract4
-from .input import gvision
-from . import file_transfer
-
-from invoice2data.extract.loader import read_templates
-
-from .output import to_csv
-from .output import to_json
-from .output import to_xml
-from .output import to_model
-
-
 logger = logging.getLogger(__name__)
+if __package__ is None or __package__ == '':
+    # uses current directory visibility
+    from input import pdftotext
+    from input import pdfminer_wrapper
+    from input import tesseract
+    from input import tesseract4
+    from input import gvision
+
+    from extract.loader import read_templates
+
+    from output import to_csv
+    from output import to_json
+    from output import to_xml
+else:
+    # uses current package visibility
+    from .input import pdftotext
+    from .input import pdfminer_wrapper
+    from .input import tesseract
+    from .input import tesseract4
+    from .input import gvision
+
+    from invoice2data.extract.loader import read_templates
+
+    from .output import to_csv
+    from .output import to_json
+    from .output import to_xml
+try:
+    envOutputModleApi = os.environ['outputModelAPI']
+    envOutputColumn = os.environ['outputColumn']
+    envTemplateIds = os.environ['templateIds'].split(',')
+    envPdfIds = os.environ['pdfId'].split(',')
+    if __package__ is None or __package__ == '':
+        from output import to_model
+        import file_transfer
+    else:
+        from .output import to_model
+        from . import file_transfer
+except KeyError as e:
+    logger.warning(f'Warning: Envionment variable "{e.args[0]}" not found!')
+    envOutputModleApi = None
+    envOutputColumn = None
+    envTemplateIds = None
+    envPdfIds = None
+    pass
 
 input_mapping = {
     'pdftotext': pdftotext,
@@ -50,7 +78,7 @@ def get_parsed_data(templates, extracted_str, partiallyExtracted):
         if t.matches_input(optimized_str):
             return t.extract(optimized_str, partiallyExtracted)
 
-    return False
+    return {}
 
 
 def extract_data(invoicefile, templates=None, input_module=pdftotext):
@@ -101,7 +129,7 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
     extracted_str = input_module.to_text(invoicefile).decode('utf-8')
     parsed_data = get_parsed_data(templates, extracted_str, partiallyExtracted)
 
-    if (parsed_data != False and parsed_data != None and 'multilines' in parsed_data) or input_module != tesseract4:
+    if (parsed_data != {} and 'multilines' in parsed_data) or input_module != tesseract4:
         parsed_data['rawData'] = extracted_str
         return parsed_data
     logger.error('No template for %s.', invoicefile)
@@ -134,7 +162,7 @@ def create_parser():
         '--output-format',
         choices=output_mapping.keys(),
         default='json',
-        help='Choose output format. Default: none',
+        help='Choose output format. Default: json',
     )
 
     parser.add_argument(
@@ -148,8 +176,7 @@ def create_parser():
         '--output-name',
         '-o',
         dest='output_name',
-        default='invoices-output',
-        help='Custom name for output file. Extension is added based on chosen format.',
+        help='Custom path+name for output file. Extension is added based on chosen format.',
     )
 
     parser.add_argument(
@@ -172,7 +199,6 @@ def create_parser():
              'Default: "{date} {invoice_number} {desc}.pdf"',
     )
 
-    # read templates from attachments
     parser.add_argument(
         '--template-folder',
         '-t',
@@ -180,11 +206,23 @@ def create_parser():
         help='Folder containing invoice templates in yml file. Always adds built-in templates.',
     )
 
-
     parser.add_argument(
-        '--input-files', dest='input_files',type=argparse.FileType('r'), nargs='+', help='File or directory to analyze.'
+        '--include-built-in-templates',
+        dest='include_built_in_templates',
+        help='Include built-in templates.',
+        action="store_true",
     )
 
+    parser.add_argument(
+        '--input-files', 
+        required=False, 
+        type=argparse.FileType('r'), 
+        nargs='+', 
+        help='File or directory to analyze.'
+    )
+    args = parser.parse_args()
+    if args.input_files and not args.output_name:
+        parser.error('You must set arg --output-name with arg --input-files')
     return parser
 
 
@@ -199,35 +237,60 @@ def main(args=None):
     else:
         logging.basicConfig(level=logging.INFO)
 
+    global envOutputModleApi
+    global envOutputColumn
+    global envTemplateIds
+    global envPdfIds
+    logger.debug(f'template_folder : {args.template_folder},  envTemplateIds: {envTemplateIds}, input_files: {args.input_files}, envPdfId: {envPdfIds}')
+    assert args.template_folder or envTemplateIds, 'Please specify template folder using command line arg "--template-folder" \
+or provide attachment ids for template in the env variable "templates"'
+    assert args.input_files or envPdfIds, 'Please specify input file location  using command line arg "--input-files" \
+or provide attachment ids of the pdf in the env variable "pdfId"'
+    
+
     input_module = input_mapping[args.input_reader]
     output_module = output_mapping[args.output_format]
 
     templates = []
+    template_folder = ''
+    # Load templates from external folder if set.
+    if args.template_folder:
+        template_folder = os.path.abspath(args.template_folder)
+    elif len(envTemplateIds) != 0:
+        logger.debug('******* Download Templates ********')
+        template_folder = os.path.abspath('downloads/templates')
+        for templateId in envTemplateIds:
+            file_transfer.downloadFile(templateId, template_folder, '.yml')        
     
-    # Download templates
-    logger.debug('******* Download Templates ********')
-    templateIds = os.environ['templates'].split(',')
-    template_folder = (args.template_folder and os.path.abspath(args.template_folder)) or os.path.abspath('downloads/templates')
-    for templateId in templateIds:
-        file_transfer.downloadFile(templateId, template_folder, '.yml')
-
     if template_folder:
         templates += read_templates(template_folder)
 
-    # download PDF
-    logger.debug('******* Download PDF ********')
-    input_files = (args.input_files and os.path.abspath(args.input_files)) or os.path.abspath('downloads')
-    pdfId = os.environ['pdfId']
-    downloaded_file = file_transfer.downloadFile(pdfId, input_files, '.pdf')
+    # Load internal templates, if enabled.
+    if args.include_built_in_templates:
+        templates += read_templates()
+    
+    
+    if args.input_files:
+        input_files = args.input_files
+    if envPdfIds:
+        # download PDF
+        logger.debug('******* Download PDFs ********')
+        input_files = []
+        for pdfId in envPdfIds:
+            downloadFolder = os.path.abspath('downloads/pdfs') 
+            downloaded_file = file_transfer.downloadFile(pdfId, downloadFolder, '.pdf')
+            try:
+                input_files.append(open(downloaded_file, 'r'))
+            except OSError as e:
+                logger.fatal('Unable to open downloaded file', exc_info=True)
 
-    # process downloaded PDF 
-    output = []
-    rawData = ''
-    with open(downloaded_file, 'r') as f:
+    # process PDFs
+    outputs = []
+    for f in input_files:
         res = extract_data(f.name, templates=templates, input_module=input_module)
         if res:
             logger.info(res)
-            output.append(res)
+            outputs.append(res)
             if args.copy:
                 filename = args.filename.format(
                     date=res['date'].strftime('%Y-%m-%d'),
@@ -241,12 +304,14 @@ def main(args=None):
                     invoice_number=res['invoice_number'],
                     desc=res['desc'],
                 )
-                shutil.move(f.name, join(args.move, filename))          
-    api = os.environ['outputModelAPI']
-    dataColumn = os.environ['outputColumn']
-    if output_module is not None:
-        output_module.write_to_file(output, args.output_name, args.output_date_format)
-        to_model.write_to_model(output, api, dataColumn, args.output_date_format)
+                shutil.move(f.name, join(args.move, filename))
+        f.close()
+
+    if envOutputModleApi and envOutputColumn:
+        for output in outputs:
+            to_model.write_to_model(outputs, envOutputModleApi, envOutputColumn, args.output_date_format)
+    elif output_module is not None:
+        output_module.write_to_file(outputs, args.output_name, args.output_date_format)
 
 
 

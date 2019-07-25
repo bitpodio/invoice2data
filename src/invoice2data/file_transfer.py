@@ -3,13 +3,18 @@ import logging as logger
 import json
 import os
 from requests_aws4auth import AWS4Auth
+import sys
 
-attachmentsUrl = os.environ['attachmentsUrl']
-if not attachmentsUrl.endswith('/'):
-    attachmentsUrl = attachmentsUrl + '/'
-accessKeyId = os.environ['accessKeyId']
-secretAccessKey = os.environ['secretAccessKey']
-auth = AWS4Auth(accessKeyId, secretAccessKey, 'eu-west-1', 's3')
+try:
+    attachmentsUrl = os.environ['attachmentsUrl']
+    if not attachmentsUrl.endswith('/'):
+        attachmentsUrl = attachmentsUrl + '/'
+    accessKeyId = os.environ['accessKeyId']
+    secretAccessKey = os.environ['secretAccessKey']
+    auth = AWS4Auth(accessKeyId, secretAccessKey, 'eu-west-1', 's3')
+except KeyError as e:
+    logger.error(f'Please set env variable {e.args[0]}')
+    sys.exit(1)
 
 def uploadFile(filePath):
     '''Uploads the file to the attachment model and returns the attachment id'''    

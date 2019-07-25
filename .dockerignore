@@ -70,3 +70,4 @@ invoices-output.json
 .vscode/
 playground/
 raw-invoice-output.txt
+*.dockerfile

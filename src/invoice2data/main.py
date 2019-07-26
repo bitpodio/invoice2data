@@ -8,43 +8,25 @@ import logging
 import json
 import sys
 logger = logging.getLogger(__name__)
-if __package__ is None or __package__ == '':
-    # uses current directory visibility
-    from input import pdftotext
-    from input import pdfminer_wrapper
-    from input import tesseract
-    from input import tesseract4
-    from input import gvision
 
-    from extract.loader import read_templates
+from .input import pdftotext
+from .input import pdfminer_wrapper
+from .input import tesseract
+from .input import tesseract4
+from .input import gvision
 
-    from output import to_csv
-    from output import to_json
-    from output import to_xml
-else:
-    # uses current package visibility
-    from .input import pdftotext
-    from .input import pdfminer_wrapper
-    from .input import tesseract
-    from .input import tesseract4
-    from .input import gvision
+from invoice2data.extract.loader import read_templates
 
-    from invoice2data.extract.loader import read_templates
-
-    from .output import to_csv
-    from .output import to_json
-    from .output import to_xml
+from .output import to_csv
+from .output import to_json
+from .output import to_xml
 try:
     envOutputModleApi = os.environ['outputModelAPI']
     envOutputColumn = os.environ['outputColumn']
     envTemplateIds = os.environ['templateIds'].split(',')
     envPdfIds = os.environ['pdfId'].split(',')
-    if __package__ is None or __package__ == '':
-        from output import to_model
-        import file_transfer
-    else:
-        from .output import to_model
-        from . import file_transfer
+    from .output import to_model
+    from . import file_transfer
 except KeyError as e:
     logger.warning(f'Warning: Envionment variable "{e.args[0]}" not found!')
     envOutputModleApi = None
@@ -99,7 +81,7 @@ def get_parsed_data(templates, extracted_str, partiallyExtracted):
             optimized_str = t.prepare_input(extracted_str)
 
             if t.matches_input(optimized_str):
-                finalData['selectedTemplate'] = t['template_name']
+                finalData['selectedTemplate'] = t['template_name'].split('.')[0]
                 return t.extract(optimized_str, partiallyExtracted)
     except Exception as e:
         updateStatus(e, 402, 'Error while parsing PDF data.', False)
@@ -323,7 +305,7 @@ or provide attachment ids of the pdf in the env variable "pdfId"'
             if finalData['extractedJson'] == None or finalData['extractedJson']  == {}: 
                 updateStatus(dbStatusCode=404, dbStatus='No data has been extracted.', commitToDB=False)
             elif ('multilines' in finalData['extractedJson'] or 'lines' in finalData['extractedJson']):
-                updateStatus(dbStatusCode=200, dbStatus='Successfully processed the PDF!', commitToDB=False)
+                updateStatus(dbStatusCode=200, dbStatus='Successfully processed the PDF.', commitToDB=False)
             else:
                 updateStatus(dbStatusCode=300, dbStatus='Unable to process lines/multilines.', commitToDB=False)
 

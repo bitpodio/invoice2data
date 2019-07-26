@@ -2,7 +2,7 @@ import csv
 import sys
 
 
-def write_to_file(data, path, date_format="%Y-%m-%d"):
+def write_to_file(data, path):
     """Export extracted fields to csv
 
     Appends .csv to path if missing and generates csv file in specified directory, if not then in root
@@ -13,8 +13,6 @@ def write_to_file(data, path, date_format="%Y-%m-%d"):
         Dictionary of extracted fields
     path : str
         directory to save generated csv file
-    date_format : str
-        Date format used in generated file
 
     Notes
     ----
@@ -43,14 +41,11 @@ def write_to_file(data, path, date_format="%Y-%m-%d"):
         for line in data:
             first_row = []
             for k, v in line.items():
-                first_row.append(k)
+                first_row.append(k) #Adding headers in the file
 
         writer.writerow(first_row)
         for line in data:
             csv_items = []
             for k, v in line.items():
-                # first_row.append(k)
-                if k.startswith('date') or k.endswith('date'):
-                    v = v.strftime(date_format)
                 csv_items.append(v)
             writer.writerow(csv_items)

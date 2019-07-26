@@ -17,6 +17,7 @@ OPTIONS_DEFAULT = {
     'lowercase': False,
     'currency': 'EUR',
     'date_formats': [],
+    'output_date_format': '%Y-%m-%d',
     'languages': [],
     'decimal_separator': '.',
     'replace': [],  # example: see templates/fr/fr.free.mobile.yml
@@ -110,8 +111,9 @@ class InvoiceTemplate(OrderedDict):
         res = dateparser.parse(
             value, date_formats=self.options['date_formats'], languages=self.options['languages']
         )
-        logger.debug("result of date parsing=%s", res)
-        return res
+        stringDate = res.strftime(self.options['output_date_format'])
+        logger.debug("result of date parsing=%s", stringDate)
+        return stringDate
 
     def coerce_type(self, value, target_type):
         if target_type == 'int':

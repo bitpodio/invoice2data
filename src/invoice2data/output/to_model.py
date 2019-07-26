@@ -6,19 +6,15 @@ import os
 from requests_aws4auth import  AWS4Auth
 import logging as logger
 
-def write_to_model(data, api, dataColumn, date_format="%Y-%m-%d"):
+def write_to_model(data, api, dataColumn):
     '''Writes the json data to given model. 
     to_json must be called before this function to convert the python datetime to string dates.'''
     accessKeyId = os.environ['accessKeyId']
     secretAccessKey = os.environ['secretAccessKey']
-    auth = AWS4Auth(accessKeyId, secretAccessKey, 'eu-west-1', 's3')
-    for line in data:
-        for k, v in line.items():
-            if k.startswith('date') or k.endswith('date'):
-                line[k] = v.strftime(date_format)    
+    auth = AWS4Auth(accessKeyId, secretAccessKey, 'eu-west-1', 's3') 
     try:
         headers = {'content-type': 'application/json'}
-        payload = {dataColumn: data[0]}
+        payload = {dataColumn: data}
         response = requests.post(api, data=json.dumps(payload), headers=headers, auth = auth)
         logger.debug(response.text)
         response.raise_for_status()

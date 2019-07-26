@@ -4,11 +4,13 @@ import json
 import os
 from requests_aws4auth import AWS4Auth
 import sys
+import yaml
 
 try:
-    attachmentsUrl = os.environ['attachmentsUrl']
-    if not attachmentsUrl.endswith('/'):
-        attachmentsUrl = attachmentsUrl + '/'
+    attachmentsAPI = os.environ['attachmentsApi']
+    templatesAPI = os.environ['templatesApi']
+    if not attachmentsAPI.endswith('/'):
+        attachmentsAPI = attachmentsAPI + '/'
     accessKeyId = os.environ['accessKeyId']
     secretAccessKey = os.environ['secretAccessKey']
     auth = AWS4Auth(accessKeyId, secretAccessKey, 'eu-west-1', 's3')
@@ -18,17 +20,17 @@ except KeyError as e:
 
 def uploadFile(filePath):
     '''Uploads the file to the attachment model and returns the attachment id'''    
-    global attachmentsUrl
+    global attachmentsAPI
     global auth
     files = {'file': open(filePath, 'rb')}
-    response = requests.post(attachmentsUrl, files=files, auth=auth)
+    response = requests.post(attachmentsAPI, files=files, auth=auth)
     contentJson = response.json()
     logger.debug(f'fn uploadFile: {contentJson}')
     return contentJson['id']
 
 def downloadFile( attachmentId, download_path, fileExt ):
     '''download the file from the attachments model for given id.'''
-    global attachmentsUrl
+    global attachmentsAPI
     global auth
     # add / in the end of download path
     if not download_path.endswith('/'):
@@ -42,10 +44,10 @@ def downloadFile( attachmentId, download_path, fileExt ):
     # complete local file name       
     local_filename = download_path + attachmentId + fileExt
     # url of the attachment to be downloaded
-    downloadAttchmentUrl = attachmentsUrl+ 'download/' +attachmentId
+    downloadAttchmentUrl = attachmentsAPI+ 'download/' +attachmentId
     # download and save the file
     with requests.get(downloadAttchmentUrl, stream=True, auth=auth) as r:
-        print(local_filename)
+        logger.debug(local_filename)
         r.raise_for_status()
         with open(local_filename, 'wb') as f:
             for chunk in r.iter_content(chunk_size=8192): 
@@ -54,6 +56,24 @@ def downloadFile( attachmentId, download_path, fileExt ):
                     # f.flush()
     return local_filename
 
-def writeToModel(api, data):
-    '''Insert data into model.'''
+def getTemplateFile(tempalteId, template_folder):
     global auth
+    global templatesAPI
+     # add / in the end of download path
+    if not template_folder.endswith('/'):
+        template_folder = template_folder + '/'
+    # create folder if does not exits
+    if not os.path.exists(template_folder):
+        os.makedirs(template_folder) 
+    # complete local file name       
+    local_filename = template_folder + tempalteId + '.yml'
+    logger.debug(local_filename)
+    # API to get template
+    getTemplateAPI = templatesAPI + tempalteId
+    # download, convert to yml and save in file
+    response = requests.get(getTemplateAPI, auth=auth)
+    response.raise_for_status()
+    responseJson = response.json()
+    with open(local_filename, 'w') as f:
+        yaml.dump(responseJson, f, default_flow_style=False)
+    return local_filename

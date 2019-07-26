@@ -4,9 +4,9 @@
 import argparse
 import shutil
 import os
-from os.path import join
 import logging
 import json
+import sys
 logger = logging.getLogger(__name__)
 if __package__ is None or __package__ == '':
     # uses current directory visibility
@@ -53,6 +53,8 @@ except KeyError as e:
     envPdfIds = None
     pass
 
+
+finalData = {}
 input_mapping = {
     'pdftotext': pdftotext,
     'tesseract': tesseract,
@@ -63,21 +65,45 @@ input_mapping = {
 
 output_mapping = {'csv': to_csv, 'json': to_json, 'xml': to_xml, 'none': None}
 
-def get_parsed_data(templates, extracted_str, partiallyExtracted):    
-    logger.debug('START pdftotext result ===========================')
-    logger.debug(extracted_str)
-    logger.debug('END pdftotext result =============================')
+def updateStatus(exception=None, dbStatusCode = 400, dbStatus=None, commitToDB=True):
+    '''
+    update finalData status and commit finalData if required.
+    Parameters
+    ----------------------
+    e            : exception that occured
+    dbStatusCode : status code to be saved in DB (default: 400)
+    dbStatus     : description of the status code or the actual error that occured.
+    commitToDB   : If True processing will exit after writing finalData to DB otherwise only the finalData is updated but not commited to DB. This will be ignored when running the tool vai command line.
+    '''
+    assert exception or (dbStatusCode != 400 and dbStatus),'Please call function with correct params.'
+     
+    finalData['statusCode'] = dbStatusCode   
+    finalData['status'] = dbStatus or f'Exception occured while processing the request {exception.args[0]}'
+    if envOutputModleApi and envOutputColumn and commitToDB:
+        to_model.write_to_model(finalData, envOutputModleApi, envOutputColumn)
+    if exception:
+        logger.error(exception, exc_info=logger.getEffectiveLevel() <= logging.DEBUG)
+    if commitToDB:
+        sys.exit()
 
-    if templates is None:
-        templates = read_templates()
-        
-    logger.debug('Testing {} template files'.format(len(templates)))
-    for t in templates:
-        optimized_str = t.prepare_input(extracted_str)
+def get_parsed_data(templates, extracted_str, partiallyExtracted):
+    try:    
+        logger.debug('START pdftotext result ===========================')
+        logger.debug(extracted_str)
+        logger.debug('END pdftotext result =============================')
+        if templates is None:
+            templates = read_templates()
+            
+        logger.debug('Testing {} template files'.format(len(templates)))
+        for t in templates:
+            optimized_str = t.prepare_input(extracted_str)
 
-        if t.matches_input(optimized_str):
-            return t.extract(optimized_str, partiallyExtracted)
-
+            if t.matches_input(optimized_str):
+                finalData['selectedTemplate'] = t['template_name']
+                return t.extract(optimized_str, partiallyExtracted)
+    except Exception as e:
+        updateStatus(e, 402, 'Error while parsing PDF data.', False)
+        return {}
     return {}
 
 
@@ -126,21 +152,31 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
     partiallyExtracted = False
     # TRY 1
     # extract data with given input_module
-    extracted_str = input_module.to_text(invoicefile).decode('utf-8')
+    try:
+        extracted_str = input_module.to_text(invoicefile).decode('utf-8')
+    except Exception as e:
+        updateStatus(e, 401, 'Error while extracting the data from PDF.', False)
+        return False
     parsed_data = get_parsed_data(templates, extracted_str, partiallyExtracted)
 
-    if (parsed_data != {} and 'multilines' in parsed_data) or input_module != tesseract4:
-        parsed_data['rawData'] = extracted_str
-        return parsed_data
+    if (parsed_data != None and parsed_data != {} and ('multilines' in parsed_data or 'lines' in parsed_data)) or input_module != tesseract4:
+        finalData['rawData'] = extracted_str
+        finalData['extractedJson'] = parsed_data
+        return True
     logger.error('No template for %s.', invoicefile)
 
     # TRY 2
     if input_module == tesseract4:
         logger.debug('Retrying with psm value of 3.')
-        extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
+        try:
+            extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
+        except Exception as e:
+            updateStatus(e, 401, 'Error while extracting the data from PDF.', True)
+            return False
         parsed_data = get_parsed_data(templates, extracted_str, partiallyExtracted)
-        parsed_data['rawData'] = extracted_str
-        return parsed_data
+        finalData['rawData'] = extracted_str
+        finalData['extractedJson'] = parsed_data
+        return True
     
 
 
@@ -163,13 +199,6 @@ def create_parser():
         choices=output_mapping.keys(),
         default='json',
         help='Choose output format. Default: json',
-    )
-
-    parser.add_argument(
-        '--output-date-format',
-        dest='output_date_format',
-        default="%Y-%m-%d",
-        help='Choose output date format. Default: %Y-%m-%d (ISO 8601 Date)',
     )
 
     parser.add_argument(
@@ -241,6 +270,7 @@ def main(args=None):
     global envOutputColumn
     global envTemplateIds
     global envPdfIds
+    global finalData
     logger.debug(f'template_folder : {args.template_folder},  envTemplateIds: {envTemplateIds}, input_files: {args.input_files}, envPdfId: {envPdfIds}')
     assert args.template_folder or envTemplateIds, 'Please specify template folder using command line arg "--template-folder" \
 or provide attachment ids for template in the env variable "templates"'
@@ -260,7 +290,7 @@ or provide attachment ids of the pdf in the env variable "pdfId"'
         logger.debug('******* Download Templates ********')
         template_folder = os.path.abspath('downloads/templates')
         for templateId in envTemplateIds:
-            file_transfer.downloadFile(templateId, template_folder, '.yml')        
+            file_transfer.getTemplateFile(templateId, template_folder)        
     
     if template_folder:
         templates += read_templates(template_folder)
@@ -281,39 +311,52 @@ or provide attachment ids of the pdf in the env variable "pdfId"'
             downloaded_file = file_transfer.downloadFile(pdfId, downloadFolder, '.pdf')
             try:
                 input_files.append(open(downloaded_file, 'r'))
-            except OSError as e:
+            except OSError:
                 logger.fatal('Unable to open downloaded file', exc_info=True)
 
     # process PDFs
     outputs = []
     for f in input_files:
+        finalData['pdfId'] = os.path.basename(f.name).split('.')[0]
         res = extract_data(f.name, templates=templates, input_module=input_module)
         if res:
-            logger.info(res)
-            outputs.append(res)
+            if finalData['extractedJson'] == None or finalData['extractedJson']  == {}: 
+                updateStatus(dbStatusCode=404, dbStatus='No data has been extracted.', commitToDB=False)
+            elif ('multilines' in finalData['extractedJson'] or 'lines' in finalData['extractedJson']):
+                updateStatus(dbStatusCode=200, dbStatus='Successfully processed the PDF!', commitToDB=False)
+            else:
+                updateStatus(dbStatusCode=300, dbStatus='Unable to process lines/multilines.', commitToDB=False)
+
+            logger.info(finalData)
+            outputs.append(finalData)
             if args.copy:
                 filename = args.filename.format(
                     date=res['date'].strftime('%Y-%m-%d'),
                     invoice_number=res['invoice_number'],
                     desc=res['desc'],
                 )
-                shutil.copyfile(f.name, join(args.copy, filename))
+                shutil.copyfile(f.name, os.path.join(args.copy, filename))
             if args.move:
                 filename = args.filename.format(
                     date=res['date'].strftime('%Y-%m-%d'),
                     invoice_number=res['invoice_number'],
                     desc=res['desc'],
                 )
-                shutil.move(f.name, join(args.move, filename))
+                shutil.move(f.name, os.path.join(args.move, filename))
+                    # Write to model as soon as possible
+            if envOutputModleApi and envOutputColumn:
+                to_model.write_to_model(finalData, envOutputModleApi, envOutputColumn)
         f.close()
+        # reset the finalData    
+        finalData = {}
 
-    if envOutputModleApi and envOutputColumn:
-        for output in outputs:
-            to_model.write_to_model(outputs, envOutputModleApi, envOutputColumn, args.output_date_format)
-    elif output_module is not None:
-        output_module.write_to_file(outputs, args.output_name, args.output_date_format)
-
+    if output_module is not None and args.output_name:
+        output_module.write_to_file(outputs, args.output_name)
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as e:
+        updateStatus(exception=e)
+        pass

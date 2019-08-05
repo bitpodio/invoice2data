@@ -272,7 +272,7 @@ or provide attachment ids of the pdf in the env variable "pdfId"'
         logger.debug('******* Download Templates ********')
         template_folder = os.path.abspath('downloads/templates')
         for templateId in envTemplateIds:
-            file_transfer.getTemplateFile(templateId, template_folder)        
+            file_transfer.getTemplateFile(templateId.strip(), template_folder)        
     
     if template_folder:
         templates += read_templates(template_folder)
@@ -290,9 +290,9 @@ or provide attachment ids of the pdf in the env variable "pdfId"'
         input_files = []
         for pdfId in envPdfIds:
             downloadFolder = os.path.abspath('downloads/pdfs') 
-            downloaded_file = file_transfer.downloadFile(pdfId, downloadFolder, '.pdf')
+            downloaded_file = file_transfer.downloadFile(pdfId.strip(), downloadFolder, '.pdf')
             try:
-                input_files.append(open(downloaded_file, 'r'))
+                input_files.append(open(downloaded_file, 'r', encoding='utf-8'))
             except OSError:
                 logger.fatal('Unable to open downloaded file', exc_info=True)
 

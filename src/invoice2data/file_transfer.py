@@ -13,6 +13,7 @@ try:
         attachmentsAPI = attachmentsAPI + '/'
     accessKeyId = os.environ['accessKeyId']
     secretAccessKey = os.environ['secretAccessKey']
+    templateFieldName = os.environ['templateFieldName']
     auth = AWS4Auth(accessKeyId, secretAccessKey, 'eu-west-1', 's3')
 except KeyError as e:
     logger.error(f'Please set env variable {e.args[0]}')
@@ -46,19 +47,23 @@ def downloadFile( attachmentId, download_path, fileExt ):
     # url of the attachment to be downloaded
     downloadAttchmentUrl = attachmentsAPI+ 'download/' +attachmentId
     # download and save the file
-    with requests.get(downloadAttchmentUrl, stream=True, auth=auth) as r:
-        logger.debug(local_filename)
-        r.raise_for_status()
-        with open(local_filename, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=8192): 
-                if chunk: # filter out keep-alive new chunks
-                    f.write(chunk)
-                    # f.flush()
-    return local_filename
+    try:
+        with requests.get(downloadAttchmentUrl, stream=True, auth=auth) as r:
+            logger.debug(local_filename)
+            r.raise_for_status()
+            with open(local_filename, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192): 
+                    if chunk: # filter out keep-alive new chunks
+                        f.write(chunk)
+                        # f.flush()
+        return local_filename
+    except requests.exceptions.HTTPError:
+        raise requests.exceptions.HTTPError(f'Error while downloading attachment id - {attachmentId}.')
 
 def getTemplateFile(tempalteId, template_folder):
     global auth
     global templatesAPI
+    global templateFieldName
      # add / in the end of download path
     if not template_folder.endswith('/'):
         template_folder = template_folder + '/'
@@ -71,9 +76,12 @@ def getTemplateFile(tempalteId, template_folder):
     # API to get template
     getTemplateAPI = templatesAPI + tempalteId
     # download, convert to yml and save in file
-    response = requests.get(getTemplateAPI, auth=auth)
-    response.raise_for_status()
+    try:
+        response = requests.get(getTemplateAPI, auth=auth)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError:
+        raise requests.exceptions.HTTPError(f'Error while downloading template id - {tempalteId}.')
     responseJson = response.json()
     with open(local_filename, 'w') as f:
-        yaml.dump(responseJson, f, default_flow_style=False)
+        f.write(responseJson[templateFieldName])
     return local_filename

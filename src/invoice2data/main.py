@@ -58,7 +58,7 @@ def updateStatus(exception=None, dbStatusCode = 400, dbStatus=None, commitToDB=T
     commitToDB   : If True processing will exit after writing finalData to DB otherwise only the finalData is updated but not commited to DB. This will be ignored when running the tool vai command line.
     '''
     assert exception or (dbStatusCode != 400 and dbStatus),'Please call function with correct params.'
-     
+    logger.debug('Updating status in finalData.') 
     finalData['statusCode'] = dbStatusCode   
     finalData['status'] = dbStatus or f'Exception occured while processing the request {exception.args[0]}'
     if envOutputModleApi and envOutputColumn and commitToDB:
@@ -66,7 +66,7 @@ def updateStatus(exception=None, dbStatusCode = 400, dbStatus=None, commitToDB=T
     if exception:
         logger.error(exception, exc_info=logger.getEffectiveLevel() <= logging.DEBUG)
     if commitToDB:
-        sys.exit()
+        sys.exit(1)
 
 def get_parsed_data(templates, extracted_str, partiallyExtracted):
     try:    
@@ -238,107 +238,106 @@ def create_parser():
 
 
 def main(args=None):
-    """Take folder or single file and analyze each."""
-    if args is None:
-        parser = create_parser()
-        args = parser.parse_args()
-
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-
-    global envOutputModleApi
-    global envOutputColumn
-    global envTemplateIds
-    global envPdfIds
-    global finalData
-    logger.debug(f'template_folder : {args.template_folder},  envTemplateIds: {envTemplateIds}, input_files: {args.input_files}, envPdfId: {envPdfIds}')
-    assert args.template_folder or envTemplateIds, 'Please specify template folder using command line arg "--template-folder" \
-or provide attachment ids for template in the env variable "templates"'
-    assert args.input_files or envPdfIds, 'Please specify input file location  using command line arg "--input-files" \
-or provide attachment ids of the pdf in the env variable "pdfId"'
-    
-
-    input_module = input_mapping[args.input_reader]
-    output_module = output_mapping[args.output_format]
-
-    templates = []
-    template_folder = ''
-    # Load templates from external folder if set.
-    if args.template_folder:
-        template_folder = os.path.abspath(args.template_folder)
-    elif len(envTemplateIds) != 0:
-        logger.debug('******* Download Templates ********')
-        template_folder = os.path.abspath('downloads/templates')
-        for templateId in envTemplateIds:
-            file_transfer.getTemplateFile(templateId.strip(), template_folder)        
-    
-    if template_folder:
-        templates += read_templates(template_folder)
-
-    # Load internal templates, if enabled.
-    if args.include_built_in_templates:
-        templates += read_templates()
-    
-    
-    if args.input_files:
-        input_files = args.input_files
-    if envPdfIds:
-        # download PDF
-        logger.debug('******* Download PDFs ********')
-        input_files = []
-        for pdfId in envPdfIds:
-            downloadFolder = os.path.abspath('downloads/pdfs') 
-            downloaded_file = file_transfer.downloadFile(pdfId.strip(), downloadFolder, '.pdf')
-            try:
-                input_files.append(open(downloaded_file, 'r', encoding='utf-8'))
-            except OSError:
-                logger.fatal('Unable to open downloaded file', exc_info=True)
-
-    # process PDFs
-    outputs = []
-    for f in input_files:
-        finalData['pdfId'] = os.path.basename(f.name).split('.')[0]
-        res = extract_data(f.name, templates=templates, input_module=input_module)
-        if res:
-            if finalData['extractedJson'] == None or finalData['extractedJson']  == {}: 
-                updateStatus(dbStatusCode=404, dbStatus='No data has been extracted.', commitToDB=False)
-            elif ('multilines' in finalData['extractedJson'] or 'lines' in finalData['extractedJson']):
-                updateStatus(dbStatusCode=200, dbStatus='Successfully processed the PDF.', commitToDB=False)
-            else:
-                updateStatus(dbStatusCode=300, dbStatus='Unable to process lines/multilines.', commitToDB=False)
-
-            logger.info(finalData)
-            outputs.append(finalData)
-            if args.copy:
-                filename = args.filename.format(
-                    date=res['date'].strftime('%Y-%m-%d'),
-                    invoice_number=res['invoice_number'],
-                    desc=res['desc'],
-                )
-                shutil.copyfile(f.name, os.path.join(args.copy, filename))
-            if args.move:
-                filename = args.filename.format(
-                    date=res['date'].strftime('%Y-%m-%d'),
-                    invoice_number=res['invoice_number'],
-                    desc=res['desc'],
-                )
-                shutil.move(f.name, os.path.join(args.move, filename))
-                    # Write to model as soon as possible
-            if envOutputModleApi and envOutputColumn:
-                to_model.write_to_model(finalData, envOutputModleApi, envOutputColumn)
-        f.close()
-        # reset the finalData    
-        finalData = {}
-
-    if output_module is not None and args.output_name:
-        output_module.write_to_file(outputs, args.output_name)
-
-
-if __name__ == '__main__':
+    """Take folder or single file and analyze each."""    
     try:
-        main()
+        if args is None:
+            parser = create_parser()
+            args = parser.parse_args()
+
+        if args.debug:
+            logging.basicConfig(level=logging.DEBUG)
+        else:
+            logging.basicConfig(level=logging.INFO)
+
+        global envOutputModleApi
+        global envOutputColumn
+        global envTemplateIds
+        global envPdfIds
+        global finalData
+        logger.debug(f'template_folder : {args.template_folder},  envTemplateIds: {envTemplateIds}, input_files: {args.input_files}, envPdfId: {envPdfIds}')
+        assert args.template_folder or envTemplateIds, 'Please specify template folder using command line arg "--template-folder" \
+or provide attachment ids for template in the env variable "templates"'
+        assert args.input_files or envPdfIds, 'Please specify input file location  using command line arg "--input-files" \
+or provide attachment ids of the pdf in the env variable "pdfId"'
+        
+
+        input_module = input_mapping[args.input_reader]
+        output_module = output_mapping[args.output_format]
+
+        templates = []
+        template_folder = ''
+        # Load templates from external folder if set.
+        if args.template_folder:
+            template_folder = os.path.abspath(args.template_folder)
+        elif len(envTemplateIds) != 0:
+            logger.debug('******* Download Templates ********')
+            template_folder = os.path.abspath('downloads/templates')
+            for templateId in envTemplateIds:
+                file_transfer.getTemplateFile(templateId.strip(), template_folder)        
+        
+        if template_folder:
+            templates += read_templates(template_folder)
+
+        # Load internal templates, if enabled.
+        if args.include_built_in_templates:
+            templates += read_templates()
+        
+        
+        if args.input_files:
+            input_files = args.input_files
+        if envPdfIds:
+            # download PDF
+            logger.debug('******* Download PDFs ********')
+            input_files = []
+            for pdfId in envPdfIds:
+                downloadFolder = os.path.abspath('downloads/pdfs') 
+                downloaded_file = file_transfer.downloadFile(pdfId.strip(), downloadFolder, '.pdf')
+                try:
+                    input_files.append(open(downloaded_file, 'r', encoding='utf-8'))
+                except OSError:
+                    logger.fatal('Unable to open downloaded file', exc_info=True)
+
+        # process PDFs
+        outputs = []
+        for f in input_files:
+            finalData['pdfId'] = os.path.basename(f.name).split('.')[0]
+            res = extract_data(f.name, templates=templates, input_module=input_module)
+            if res:
+                if finalData['extractedJson'] == None or finalData['extractedJson']  == {}: 
+                    updateStatus(dbStatusCode=404, dbStatus='No data has been extracted.', commitToDB=False)
+                elif ('multilines' in finalData['extractedJson'] or 'lines' in finalData['extractedJson']):
+                    updateStatus(dbStatusCode=200, dbStatus='Successfully processed the PDF.', commitToDB=False)
+                else:
+                    updateStatus(dbStatusCode=300, dbStatus='Unable to process lines/multilines.', commitToDB=False)
+
+                logger.info(finalData)
+                outputs.append(finalData)
+                if args.copy:
+                    filename = args.filename.format(
+                        date=res['date'].strftime('%Y-%m-%d'),
+                        invoice_number=res['invoice_number'],
+                        desc=res['desc'],
+                    )
+                    shutil.copyfile(f.name, os.path.join(args.copy, filename))
+                if args.move:
+                    filename = args.filename.format(
+                        date=res['date'].strftime('%Y-%m-%d'),
+                        invoice_number=res['invoice_number'],
+                        desc=res['desc'],
+                    )
+                    shutil.move(f.name, os.path.join(args.move, filename))
+                        # Write to model as soon as possible
+                if envOutputModleApi and envOutputColumn:
+                    to_model.write_to_model(finalData, envOutputModleApi, envOutputColumn)
+            f.close()
+            # reset the finalData    
+            finalData = {}
+
+        if output_module is not None and args.output_name:
+            output_module.write_to_file(outputs, args.output_name)
     except Exception as e:
         updateStatus(exception=e)
         pass
+
+if __name__ == '__main__':
+    main()

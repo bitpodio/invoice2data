@@ -11,7 +11,7 @@ RUN apt-get update && \
     apt-get clean
 
 #RUN git clone https://github.com/bitpodio/invoice2data.git -b job_creation --single-branch && cd ./invoice2data && python3 setup.py install
-COPY ./ /home/app/
+COPY ./ ./
 
 RUN python3 setup.py install &&\
     rm -rf /home/app/*

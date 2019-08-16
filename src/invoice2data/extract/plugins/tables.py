@@ -8,8 +8,12 @@ import logging as logger
 DEFAULT_OPTIONS = {'field_separator': r'\s+', 'line_separator': r'\n'}
 
 
-def extract(self, content, output):
+def extract(self, content, pdfStatus):
     """Try to extract tables from an invoice"""
+
+    # **** do not reassign these variable. Because they hold reference to dict. values.
+    warnings = pdfStatus['warnings']
+    output = pdfStatus['output']
 
     for table in self['tables']:
 
@@ -19,15 +23,25 @@ def extract(self, content, output):
         table = plugin_settings
 
         # Validate settings
-        assert 'start' in table, 'Table start regex missing'
-        assert 'end' in table, 'Table end regex missing'
-        assert 'body' in table, 'Table body regex missing'
+        if 'start' not in table:
+            warnings.append('Table start regex is missing in the template.')
+            pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
+            return
+        if 'end' not in table:
+            warnings.append('Table end regex is missing in the template.')
+            pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
+            return
+        if 'body' not in table:
+            warnings.append('Table body regex is missing in the template.')
+            pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
+            return
 
         start = re.search(table['start'], content)
         end = re.search(table['end'], content)
 
         if not start or not end:
-            logger.warning('no table body found - start %s, end %s', start, end)
+            warnings.append(f'no table body found - start {start}, end {end}')
+            pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
             continue
 
         table_body = content[start.end(): end.start()]
@@ -47,10 +61,12 @@ def extract(self, content, output):
                     if field.startswith('date') or field.endswith('date'):
                         output[field] = self.parse_date(value)
                         if not output[field]:
-                            logger.error("Date parsing failed on date '%s'", value)
-                            return None
+                            output[field] = value
+                            warnings.append(f'Date parsing failed on date {value}')
+                            pdfStatus['dbStatusCode'] = 300 if pdfStatus['dbStatusCode'] < 300 else pdfStatus['dbStatusCode']
                     elif field.startswith('amount'):
                         output[field] = self.parse_number(value)
                     else:
                         output[field] = value
-            logger.debug('ignoring *%s* because it doesn\'t match anything', line)
+            warnings.append(f'ignoring *{line}* because it doesn\'t match anything')
+            pdfStatus['dbStatusCode'] = 320 if pdfStatus['dbStatusCode'] < 320 else pdfStatus['dbStatusCode']

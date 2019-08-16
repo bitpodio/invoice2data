@@ -36,7 +36,7 @@ except KeyError as e:
     pass
 
 
-finalData = {}
+finalData = {'statusCode': 200, 'status': '', 'extractedJson':{}}
 input_mapping = {
     'pdftotext': pdftotext,
     'tesseract': tesseract,
@@ -59,8 +59,9 @@ def updateStatus(exception=None, dbStatusCode = 400, dbStatus=None, commitToDB=T
     '''
     assert exception or (dbStatusCode != 400 and dbStatus),'Please call function with correct params.'
     logger.debug('Updating status in finalData.') 
-    finalData['statusCode'] = dbStatusCode   
-    finalData['status'] = dbStatus or f'Exception occured while processing the request {exception.args[0]}'
+    finalData['statusCode'] = dbStatusCode if  dbStatusCode > finalData['statusCode'] else finalData['statusCode'] 
+    dbStatus = dbStatus or f'Exception occurred while processing the request {exception.args[0]}'
+    finalData['status'] = dbStatus if not finalData['status'] else finalData['status'] + ', "' + dbStatus + '"'
     if envOutputModleApi and envOutputColumn and commitToDB:
         to_model.write_to_model(finalData, envOutputModleApi, envOutputColumn)
     if exception:
@@ -68,7 +69,38 @@ def updateStatus(exception=None, dbStatusCode = 400, dbStatus=None, commitToDB=T
     if commitToDB:
         sys.exit(1)
 
-def get_parsed_data(templates, extracted_str, partiallyExtracted):
+
+def updateFinalDataFromPdfData(finalPdfData, noOfPass, optimized_str, selectedTemplate):
+    if (noOfPass > 1) and finalData['statusCode'] <= finalPdfData['dbStatusCode'] :
+        logger.debug('Skipping the results of this pass. Because the last pass has given better results.')
+        return True
+    else:
+        logger.debug('Clearing the status from previous pass.')
+        finalData['status'] = ''
+        finalData['statusCode'] = 200
+
+    finalData['rawData'] = optimized_str
+    finalData['selectedTemplate'] = selectedTemplate
+    if len(finalPdfData['warnings']) > 1:
+        # prepare comma seperated list of warnings
+        processingWarnings = '", "'.join(finalPdfData['warnings'])
+        processingWarnings = '"'+processingWarnings+'"'  
+    elif len(finalPdfData['warnings']) == 1:
+        processingWarnings = finalPdfData['warnings'][0]
+
+    if finalPdfData['output']:
+        finalData['extractedJson']  = finalPdfData['output']
+    
+    if ((finalData['extractedJson'] == None or finalData['extractedJson'] == {}) and finalData['statusCode'] < 400):
+        updateStatus(dbStatusCode=404, dbStatus='Unknown error, no data was extracted.', commitToDB=False)
+    elif(finalPdfData['dbStatusCode'] == 200):
+        updateStatus(dbStatusCode=200, dbStatus='Successfully processed the PDF.', commitToDB=False)    
+    else:
+        updateStatus(dbStatusCode=finalPdfData['dbStatusCode'], dbStatus=processingWarnings, commitToDB=False)
+
+    return True
+
+def parse_data(templates, extracted_str, noOfPass):
     try:    
         logger.debug('START pdftotext result ===========================')
         logger.debug(extracted_str)
@@ -77,16 +109,22 @@ def get_parsed_data(templates, extracted_str, partiallyExtracted):
             templates = read_templates()
             
         logger.debug('Testing {} template files'.format(len(templates)))
+        selectedTemplate = ''
         for t in templates:
             optimized_str = t.prepare_input(extracted_str)
 
             if t.matches_input(optimized_str):
-                finalData['selectedTemplate'] = t['template_name'].split('.')[0]
-                return t.extract(optimized_str, partiallyExtracted)
+                selectedTemplate = t['template_name'].split('.')[0]
+                processedPDF = t.extract(optimized_str)
+                return updateFinalDataFromPdfData(processedPDF, noOfPass, optimized_str, selectedTemplate)      
     except Exception as e:
-        updateStatus(e, 402, 'Error while parsing PDF data.', False)
-        return {}
-    return {}
+        updateStatus(e, 402, f'Error while parsing PDF data. Error {str(e)}', False)
+        return False
+    if ('selectedTemplate' not in finalData.keys() or finalData['selectedTemplate'] == ''):
+        logger.error('No matching template found for the PDF.')
+        updateStatus(dbStatusCode=404, dbStatus='No matching template found for the PDF based on the "keywords".', commitToDB=False)    
+        return False
+    raise Exception('Some unknown error has occured while processing the pdf.') 
 
 
 def extract_data(invoicefile, templates=None, input_module=pdftotext):
@@ -131,34 +169,28 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
      'currency': 'INR', 'desc': 'Invoice IBZY2087 from OYO'}
 
     """
-    partiallyExtracted = False
     # TRY 1
     # extract data with given input_module
     try:
         extracted_str = input_module.to_text(invoicefile).decode('utf-8')
+        finalData['rawData'] = extracted_str #This value will be overwritten but assiging raw data here so we have something to investigate in case anything fails.
     except Exception as e:
         updateStatus(e, 401, 'Error while extracting the data from PDF.', False)
         return False
-    parsed_data = get_parsed_data(templates, extracted_str, partiallyExtracted)
+    isParsed = parse_data(templates, extracted_str, 1)
 
-    if (parsed_data != None and parsed_data != {} and ('multilines' in parsed_data or 'lines' in parsed_data)) or input_module != tesseract4:
-        finalData['rawData'] = extracted_str
-        finalData['extractedJson'] = parsed_data
+    if (isParsed and finalData['statusCode'] == 200) or input_module != tesseract4:
         return True
-    logger.error('No template for %s.', invoicefile)
 
     # TRY 2
-    if input_module == tesseract4:
-        logger.debug('Retrying with psm value of 3.')
-        try:
-            extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
-        except Exception as e:
-            updateStatus(e, 401, 'Error while extracting the data from PDF.', True)
-            return False
-        parsed_data = get_parsed_data(templates, extracted_str, partiallyExtracted)
-        finalData['rawData'] = extracted_str
-        finalData['extractedJson'] = parsed_data
-        return True
+    logger.debug('Retrying with psm value of 3.')
+    try:
+        extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
+        finalData['rawData'] = extracted_str #This value will be overwritten but assiging raw data here so we have something to investigate in case anything fails.
+    except Exception as e:
+        updateStatus(e, 401, 'Error while extracting the data from PDF.', True)
+        return False
+    return parse_data(templates, extracted_str, 2)
     
 
 
@@ -192,14 +224,6 @@ def create_parser():
 
     parser.add_argument(
         '--debug', dest='debug', action='store_true', help='Enable debug information.'
-    )
-
-    parser.add_argument(
-        '--copy', '-c', dest='copy', help='Copy and rename processed PDFs to specified folder.'
-    )
-
-    parser.add_argument(
-        '--move', '-m', dest='move', help='Move and rename processed PDFs to specified folder.'
     )
 
     parser.add_argument(
@@ -302,33 +326,10 @@ or provide attachment ids of the pdf in the env variable "pdfId"'
         for f in input_files:
             finalData['pdfId'] = os.path.basename(f.name).split('.')[0]
             res = extract_data(f.name, templates=templates, input_module=input_module)
-            if res:
-                if finalData['extractedJson'] == None or finalData['extractedJson']  == {}: 
-                    updateStatus(dbStatusCode=404, dbStatus='No data has been extracted.', commitToDB=False)
-                elif ('multilines' in finalData['extractedJson'] or 'lines' in finalData['extractedJson']):
-                    updateStatus(dbStatusCode=200, dbStatus='Successfully processed the PDF.', commitToDB=False)
-                else:
-                    updateStatus(dbStatusCode=300, dbStatus='Unable to process lines/multilines.', commitToDB=False)
-
-                logger.info(finalData)
-                outputs.append(finalData)
-                if args.copy:
-                    filename = args.filename.format(
-                        date=res['date'].strftime('%Y-%m-%d'),
-                        invoice_number=res['invoice_number'],
-                        desc=res['desc'],
-                    )
-                    shutil.copyfile(f.name, os.path.join(args.copy, filename))
-                if args.move:
-                    filename = args.filename.format(
-                        date=res['date'].strftime('%Y-%m-%d'),
-                        invoice_number=res['invoice_number'],
-                        desc=res['desc'],
-                    )
-                    shutil.move(f.name, os.path.join(args.move, filename))
-                        # Write to model as soon as possible
-                if envOutputModleApi and envOutputColumn:
-                    to_model.write_to_model(finalData, envOutputModleApi, envOutputColumn)
+            logger.info(finalData)
+            outputs.append(finalData)
+            if envOutputModleApi and envOutputColumn:
+                to_model.write_to_model(finalData, envOutputModleApi, envOutputColumn)
             f.close()
             # reset the finalData    
             finalData = {}

@@ -128,11 +128,11 @@ class InvoiceTemplate(OrderedDict):
             return self.parse_date(value)
         assert False, 'Unknown type'
 
-    def extract(self, optimized_str, partiallyExtracted=False):
+    def extract(self, optimized_str):
         """
         Given a template file and a string, extract matching data fields.
         """
-
+        #status of PDF processing
         logger.debug('START optimized_str ========================')
         logger.debug(optimized_str)
         logger.debug('END optimized_str ==========================')
@@ -145,8 +145,13 @@ class InvoiceTemplate(OrderedDict):
         logger.debug("keywords=%s", self['keywords'])
         logger.debug(self.options)
 
+        # create references for each 
+        # do not reassign these variable. Because they hold reference to dict. values.
+        pdfStatus = {'dbStatusCode':200, 'warnings': [], 'output': {}}
+        warnings = pdfStatus['warnings']
+        output = pdfStatus['output']   
+
         # Try to find data for each field.
-        output = {}
         output['issuer'] = self['issuer']
 
         for k, v in self['fields'].items():
@@ -177,8 +182,9 @@ class InvoiceTemplate(OrderedDict):
                     if k.startswith('date') or k.endswith('date'):
                         output[k] = self.parse_date(res_find[0])
                         if not output[k]:
-                            logger.error("Date parsing failed on date '%s'", res_find[0])
-                            return None
+                            warnings.append(f'Date parsing failed on date {res_find[0]}')
+                            pdfStatus['dbStatusCode'] = 300 if pdfStatus['dbStatusCode'] <300 else pdfStatus['dbStatusCode']
+                            output[k] = res_find[0]
                     elif k.startswith('amount'):
                         if sum_field:
                             output[k] = 0
@@ -193,32 +199,29 @@ class InvoiceTemplate(OrderedDict):
                         else:
                             output[k] = res_find
                 else:
-                    logger.warning("regexp for field %s didn't match", k)
+                    pdfStatus['dbStatusCode'] = 310 if pdfStatus['dbStatusCode'] <310 else pdfStatus['dbStatusCode']
+                    warnings.append(f'regexp for field for "{k}" didn\'t match')
 
         output['currency'] = self.options['currency']
 
         # Run plugins:
         for plugin_keyword, plugin_func in PLUGIN_MAPPING.items():
             if plugin_keyword in self.keys():
-                plugin_func.extract(self, optimized_str, output)
+                plugin_func.extract(self, optimized_str, pdfStatus)
 
         # If required fields were found, return output, else log error.
-        if 'required_fields' not in self.keys():
-            required_fields = ['date', 'amount', 'invoice_number', 'issuer']
-        else:
-            required_fields = []
+        required_fields = []
+        if 'required_fields' in self.keys():
             for v in self['required_fields']:
                 required_fields.append(v)
 
         if set(required_fields).issubset(output.keys()):
             output['desc'] = 'Invoice from %s' % (self['issuer'])
             logger.debug(output)
-            return output
+            return pdfStatus
         else:
             fields = list(set(output.keys()))
-            logger.error(
-                'Unable to match all required fields. '
-                'The required fields are: {0}. '
-                'Output contains the following fields: {1}.'.format(required_fields, fields)
-            )
-            return None
+            warnings.append(f'Unable to match all required fields. \n \
+                The required fields are: {required_fields}. \n \
+                Output contains the following fields: {fields}.')
+            return pdfStatus 

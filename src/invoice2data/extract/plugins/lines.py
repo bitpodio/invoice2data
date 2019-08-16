@@ -10,7 +10,7 @@ import logging as logger
 DEFAULT_OPTIONS = {'field_separator': r'\s+', 'line_separator': r'\n'}
 
 
-def extract(self, content, output):
+def extract(self, content, pdfStatus):
     """Try to extract lines from the invoice"""
 
     # First apply default options.
@@ -18,15 +18,29 @@ def extract(self, content, output):
     plugin_settings.update(self['lines'])
     self['lines'] = plugin_settings
 
+    # **** do not reassign these variable. Because they hold reference to dict. values.
+    warnings = pdfStatus['warnings']
+    output = pdfStatus['output']
+    
     # Validate settings
-    assert 'start' in self['lines'], 'Lines start regex missing'
-    assert 'end' in self['lines'], 'Lines end regex missing'
-    assert 'line' in self['lines'], 'Line regex missing'
+    if 'start' not in self['lines']:
+        warnings.append('Lines start regex is missing in the template.')
+        pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
+        return
+    if 'end' not in self['lines']:
+        warnings.append('Lines end regex is missing in the template.')
+        pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
+        return
+    if 'line' not in self['lines']:
+        warnings.append('Lines regex is missing in the template.')
+        pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
+        return
 
     start = re.search(self['lines']['start'], content)
     end = re.search(self['lines']['end'], content)
     if not start or not end:
-        logger.warning('no lines found - start %s, end %s', start, end)
+        warnings.append(f'No lines found - start {start}, end {end}')
+        pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
         return
     content = content[start.end(): end.start()]
     lines = []
@@ -73,7 +87,8 @@ def extract(self, content, output):
                     value.strip() if value else '',
                 )
             continue
-        logger.debug('ignoring *%s* because it doesn\'t match anything', line)
+        warnings.append(f'ignoring *{line}* because it doesn\'t match anything')
+        pdfStatus['dbStatusCode'] = 320 if pdfStatus['dbStatusCode'] < 320 else pdfStatus['dbStatusCode'] 
     if current_row:
         lines.append(current_row)
 
@@ -81,7 +96,11 @@ def extract(self, content, output):
     for row in lines:
         for name in row.keys():
             if name in types:
-                row[name] = self.coerce_type(row[name], types[name])
+                try:
+                    row[name] = self.coerce_type(row[name], types[name])
+                except AssertionError:
+                    warnings.append(f'Unable to convert {name}, value - {row[name]} in type/format {types[name]}.')
+                    pdfStatus['dbStatusCode'] = 300 if pdfStatus['dbStatusCode'] < 300 else pdfStatus['dbStatusCode'] 
 
     if lines:
         output['lines'] = lines

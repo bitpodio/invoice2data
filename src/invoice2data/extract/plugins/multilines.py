@@ -9,7 +9,7 @@ import logging as logger
 DEFAULT_OPTIONS = {'field_separator': r'\s+', 'line_separator': r'\n'}
 
 
-def extract(self, content, output):
+def extract(self, content, pdfStatus):
     """Try to extract lines from the invoice"""
 
     # First apply default options.
@@ -17,16 +17,31 @@ def extract(self, content, output):
     plugin_settings.update(self['multilines'])
     self['multilines'] = plugin_settings
 
+    # **** do not reassign these variable. Because they hold reference to dict. values.
+    warnings = pdfStatus['warnings']
+    output = pdfStatus['output']
+
     # Validate settings
-    assert 'start' in self['multilines'], 'Multilines start regex missing'
-    assert 'end' in self['multilines'], 'Multilines end regex missing'
-    assert 'line' in self['multilines'], 'Multilines line regex missing'
-    assert 'first_line' in self['multilines'], 'Multilines first_line regex missing'
+    if 'start' not in self['multilines']:
+        warnings.append('Multilines start regex is missing in the template.')
+        pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
+        return
+    if 'end' not in self['multilines']:
+        warnings.append('Multilines end regex is missing in the template.')
+        pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
+        return
+    if 'first_line' not in self['multilines']:
+        warnings.append('Multilines first_line regex is missing in the template.')
+        pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
+        return
+    if 'line' not in self['multilines']:
+        logger.warning('Multilines line regex is missing in the template.')
     
     start = re.search(self['multilines']['start'], content)
     end = re.search(self['multilines']['end'], content)
     if not start or not end:
-        logger.warning('no lines found - start %s, end %s', start, end)
+        warnings.append(f'no lines found - start {start}, end {end}.')
+        pdfStatus['dbStatusCode'] = 330 if pdfStatus['dbStatusCode'] < 330 else pdfStatus['dbStatusCode']
         return
     content = content[start.end(): end.start()]
     lines = []
@@ -63,7 +78,8 @@ def extract(self, content, output):
                 break
         if match:
             continue     
-        logger.debug('ignoring *%s* because didn\'t find any match for the line', line)
+        warnings.append(f'ignoring *{line}* because didn\'t find any match for the line')
+        pdfStatus['dbStatusCode'] = 320 if pdfStatus['dbStatusCode'] < 320 else pdfStatus['dbStatusCode']
 
     if current_row: # This for the last line in the table
         lines.append(current_row)
@@ -72,7 +88,11 @@ def extract(self, content, output):
     for row in lines:
         for name in row.keys():
             if name in types:
-                row[name] = self.coerce_type(row[name], types[name])
+                try:
+                    row[name] = self.coerce_type(row[name], types[name])
+                except AssertionError:
+                    warnings.append(f'Unable to convert {name}, value - {row[name]} in type/format {types[name]}.')
+                    pdfStatus['dbStatusCode'] = 300 if pdfStatus['dbStatusCode'] < 300 else pdfStatus['dbStatusCode'] 
 
     if lines:
         output['multilines'] = lines

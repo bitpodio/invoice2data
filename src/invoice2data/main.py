@@ -186,7 +186,7 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
     logger.debug('Retrying with psm value of 3.')
     try:
         extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
-        finalData['rawData'] = extracted_str #This value will be overwritten but assiging raw data here so we have something to investigate in case anything fails.
+        #finalData['rawData'] = extracted_str #This value will be overwritten but assiging raw data here so we have something to investigate in case anything fails.
     except Exception as e:
         updateStatus(e, 401, 'Error while extracting the data from PDF.', True)
         return False

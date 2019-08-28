@@ -177,20 +177,21 @@ def extract_data(invoicefile, templates=None, input_module=pdftotext):
     except Exception as e:
         updateStatus(e, 401, 'Error while extracting the data from PDF.', False)
         return False
-    isParsed = parse_data(templates, extracted_str, 1)
+    return parse_data(templates, extracted_str, 1)
+    # isParsed = parse_data(templates, extracted_str, 1)
 
-    if (isParsed and finalData['statusCode'] == 200) or input_module != tesseract4:
-        return True
+    # if (isParsed and finalData['statusCode'] == 200) or input_module != tesseract4:
+    #     return True
 
-    # TRY 2
-    logger.debug('Retrying with psm value of 3.')
-    try:
-        extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
-        #finalData['rawData'] = extracted_str #This value will be overwritten but assiging raw data here so we have something to investigate in case anything fails.
-    except Exception as e:
-        updateStatus(e, 401, 'Error while extracting the data from PDF.', True)
-        return False
-    return parse_data(templates, extracted_str, 2)
+    # # TRY 2
+    # logger.debug('Retrying with psm value of 3.')
+    # try:
+    #     extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
+    #     #finalData['rawData'] = extracted_str #This value will be overwritten but assiging raw data here so we have something to investigate in case anything fails.
+    # except Exception as e:
+    #     updateStatus(e, 401, 'Error while extracting the data from PDF.', True)
+    #     return False
+    # return parse_data(templates, extracted_str, 2)
     
 
 

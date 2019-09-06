@@ -70,3 +70,5 @@ playground/
 raw-invoice-output.txt
 ocr_job.yml
 invoice-output.json
+*.code-workspace
+*.prof

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import argparse
+
 import shutil
 import os
 import logging
@@ -20,23 +20,10 @@ from invoice2data.extract.loader import read_templates
 from .output import to_csv
 from .output import to_json
 from .output import to_xml
-try:
-    envOutputModleApi = os.environ['outputModelAPI']
-    envOutputColumn = os.environ['outputColumn']
-    envTemplateIds = os.environ['templateIds'].split(',')
-    envPdfIds = os.environ['pdfId'].split(',')
-    from .output import to_model
-    from . import file_transfer
-except KeyError as e:
-    logger.warning(f'Warning: Envionment variable "{e.args[0]}" not found!')
-    envOutputModleApi = None
-    envOutputColumn = None
-    envTemplateIds = None
-    envPdfIds = None
-    pass
+from .final_data import FinalData
+from . import file_transfer
+from .prepare_input import getSettings
 
-
-finalData = {'statusCode': 200, 'status': '', 'extractedJson':{}}
 input_mapping = {
     'pdftotext': pdftotext,
     'tesseract': tesseract,
@@ -44,67 +31,17 @@ input_mapping = {
     'pdfminer': pdfminer_wrapper,
     'gvision': gvision,
 }
+finalData = FinalData()
 
 output_mapping = {'csv': to_csv, 'json': to_json, 'xml': to_xml, 'none': None}
 
-def updateStatus(exception=None, dbStatusCode = 400, dbStatus=None, commitToDB=True):
-    '''
-    update finalData status and commit finalData if required.
-    Parameters
-    ----------------------
-    e            : exception that occured
-    dbStatusCode : status code to be saved in DB (default: 400)
-    dbStatus     : description of the status code or the actual error that occured.
-    commitToDB   : If True processing will exit after writing finalData to DB otherwise only the finalData is updated but not commited to DB. This will be ignored when running the tool vai command line.
-    '''
-    assert exception or (dbStatusCode != 400 and dbStatus),'Please call function with correct params.'
-    logger.debug('Updating status in finalData.') 
-    finalData['statusCode'] = dbStatusCode if  dbStatusCode > finalData['statusCode'] else finalData['statusCode'] 
-    dbStatus = dbStatus or f'Exception occurred while processing the request {exception.args[0]}'
-    finalData['status'] = dbStatus if not finalData['status'] else finalData['status'] + ', "' + dbStatus + '"'
-    if envOutputModleApi and envOutputColumn and commitToDB:
-        to_model.write_to_model(finalData, envOutputModleApi, envOutputColumn)
-    if exception:
-        logger.error(exception, exc_info=logger.getEffectiveLevel() <= logging.DEBUG)
-    if commitToDB:
-        sys.exit(1)
 
-
-def updateFinalDataFromPdfData(finalPdfData, noOfPass, optimized_str, selectedTemplate):
-    if (noOfPass > 1) and finalData['statusCode'] <= finalPdfData['dbStatusCode'] :
-        logger.debug('Skipping the results of this pass. Because the last pass has given better results.')
-        return True
-    else:
-        logger.debug('Clearing the status from previous pass.')
-        finalData['status'] = ''
-        finalData['statusCode'] = 200
-
-    finalData['rawData'] = optimized_str
-    finalData['selectedTemplate'] = selectedTemplate
-    if len(finalPdfData['warnings']) > 1:
-        # prepare comma seperated list of warnings
-        processingWarnings = '", "'.join(finalPdfData['warnings'])
-        processingWarnings = '"'+processingWarnings+'"'  
-    elif len(finalPdfData['warnings']) == 1:
-        processingWarnings = finalPdfData['warnings'][0]
-
-    if finalPdfData['output']:
-        finalData['extractedJson']  = finalPdfData['output']
-    
-    if ((finalData['extractedJson'] == None or finalData['extractedJson'] == {}) and finalData['statusCode'] < 400):
-        updateStatus(dbStatusCode=404, dbStatus='Unknown error, no data was extracted.', commitToDB=False)
-    elif(finalPdfData['dbStatusCode'] == 200):
-        updateStatus(dbStatusCode=200, dbStatus='Successfully processed the PDF.', commitToDB=False)    
-    else:
-        updateStatus(dbStatusCode=finalPdfData['dbStatusCode'], dbStatus=processingWarnings, commitToDB=False)
-
-    return True
-
-def parse_data(templates, extracted_str, noOfPass):
+def parse_data(templates, extracted_str):
     try:    
         logger.debug('START pdftotext result ===========================')
         logger.debug(extracted_str)
         logger.debug('END pdftotext result =============================')
+        finalData.runningStatus = 'EXTRACTING_DATA'
         if templates is None:
             templates = read_templates()
             
@@ -115,230 +52,108 @@ def parse_data(templates, extracted_str, noOfPass):
 
             if t.matches_input(optimized_str):
                 selectedTemplate = t['template_name'].split('.')[0]
-                processedPDF = t.extract(optimized_str)
-                return updateFinalDataFromPdfData(processedPDF, noOfPass, optimized_str, selectedTemplate)      
+                extractionDetails = t.extract(optimized_str)
+                return finalData.updateFinalDataFromPdfData(extractionDetails, optimized_str, selectedTemplate)      
     except Exception as e:
-        updateStatus(e, 402, f'Error while parsing PDF data. Error {str(e)}', False)
+        finalData.updateStatus(e, 402, 'Error while parsing PDF data. Error '+ str(e), False)
         return False
-    if ('selectedTemplate' not in finalData.keys() or finalData['selectedTemplate'] == ''):
+    if (finalData.selectedTemplate == ''):
         logger.error('No matching template found for the PDF.')
-        updateStatus(dbStatusCode=404, dbStatus='No matching template found for the PDF based on the "keywords".', commitToDB=False)    
+        finalData.updateStatus(dbStatusCode=404, dbStatus='No matching template found for the PDF based on the "keywords".', commitToDB=False)    
         return False
     raise Exception('Some unknown error has occured while processing the pdf.') 
 
 
 def extract_data(invoicefile, templates=None, input_module=pdftotext):
-    """Extracts structured data from PDF/image invoices.
-
-    This function uses the text extracted from a PDF file or image and
-    pre-defined regex templates to find structured data.
-
-    Reads template if no template assigned
-    Required fields are matches from templates
-
-    Parameters
-    ----------
-    invoicefile : str
-        path of electronic invoice file in PDF,JPEG,PNG (example: "/home/duskybomb/pdf/invoice.pdf")
-    templates : list of instances of class `InvoiceTemplate`, optional
-        Templates are loaded using `read_template` function in `loader.py`
-    input_module : {'pdftotext', 'pdfminer', 'tesseract'}, optional
-        library to be used to extract text from given `invoicefile`,
-
-    Returns
-    -------
-    dict or False
-        extracted and matched fields or False if no template matches
-
-    Notes
-    -----
-    Import required `input_module` when using invoice2data as a library
-
-    See Also
-    --------
-    read_template : Function where templates are loaded
-    InvoiceTemplate : Class representing single template files that live as .yml files on the disk
-
-    Examples
-    --------
-    When using `invoice2data` as an library
-
-    >>> from invoice2data.input import pdftotext
-    >>> extract_data("invoice2data/test/pdfs/oyo.pdf", None, pdftotext)
-    {'issuer': 'OYO', 'amount': 1939.0, 'date': datetime.datetime(2017, 12, 31, 0, 0), 'invoice_number': 'IBZY2087',
-     'currency': 'INR', 'desc': 'Invoice IBZY2087 from OYO'}
-
-    """
     # TRY 1
     # extract data with given input_module
-    try:
-        extracted_str = input_module.to_text(invoicefile).decode('utf-8')
-        finalData['rawData'] = extracted_str #This value will be overwritten but assiging raw data here so we have something to investigate in case anything fails.
-    except Exception as e:
-        updateStatus(e, 401, 'Error while extracting the data from PDF.', False)
-        return False
-    return parse_data(templates, extracted_str, 1)
-    # isParsed = parse_data(templates, extracted_str, 1)
+    doNextPass = True
+    finalData.passNumber = 1
+    while doNextPass:
+        try:
+            finalData.runningStatus = 'READING_PDF'
+            extracted_str = input_module.to_text(invoicefile).decode('utf-8')
+            finalData.rawData = extracted_str # This value will be overwritten but assiging raw data here so we have something to investigate in case anything fails.
+        except Exception as e:
+            finalData.updateStatus(e, 401, 'Error while extracting the data from PDF.', False)
+        isParsed = parse_data(templates, extracted_str)
+        (input_module, doNextPass) = setupNextPass(isParsed)
 
-    # if (isParsed and finalData['statusCode'] == 200) or input_module != tesseract4:
-    #     return True
+def setupNextPass(isParsed):
+    '''
+    Checks if the last pass was successful, if not then returns input_module for the next pass and doNextPass as True.
+    '''
+    if (isParsed and finalData.statusCode == 200):
+        return None, False
+    finalData.passNumber += 1
+    if finalData.passNumber == 2:
+        logger.debug('Retrying to extract the data using tesseract4.')
+        return input_mapping['tesseract4'], True
+    return None, False
 
-    # # TRY 2
-    # logger.debug('Retrying with psm value of 3.')
-    # try:
-    #     extracted_str = input_module.to_text(invoicefile, psm='3').decode('utf-8')
-    #     #finalData['rawData'] = extracted_str #This value will be overwritten but assiging raw data here so we have something to investigate in case anything fails.
-    # except Exception as e:
-    #     updateStatus(e, 401, 'Error while extracting the data from PDF.', True)
-    #     return False
-    # return parse_data(templates, extracted_str, 2)
-    
+def downloadFilesAndUpdatingSettings(settings):
+    logger.debug('******* Download Templates ********')
+    for templateId in settings['templateIds']:
+        file_transfer.getTemplateFile(templateId.strip(), settings['template_folder'])  
 
-
-def create_parser():
-    """Returns argument parser """
-
-    parser = argparse.ArgumentParser(
-        description='Extract structured data from PDF files and save to CSV or JSON.'
-    )
-
-    parser.add_argument(
-        '--input-reader',
-        choices=input_mapping.keys(),
-        default='tesseract4',
-        help='Choose text extraction function. Default: tesseract4',
-    )
-
-    parser.add_argument(
-        '--output-format',
-        choices=output_mapping.keys(),
-        default='json',
-        help='Choose output format. Default: json',
-    )
-
-    parser.add_argument(
-        '--output-name',
-        '-o',
-        dest='output_name',
-        help='Custom path+name for output file. Extension is added based on chosen format.',
-    )
-
-    parser.add_argument(
-        '--debug', dest='debug', action='store_true', help='Enable debug information.'
-    )
-
-    parser.add_argument(
-        '--filename-format',
-        dest='filename',
-        default="{date} {invoice_number} {desc}.pdf",
-        help='Filename format to use when moving or copying processed PDFs.'
-             'Default: "{date} {invoice_number} {desc}.pdf"',
-    )
-
-    parser.add_argument(
-        '--template-folder',
-        '-t',
-        dest='template_folder',
-        help='Folder containing invoice templates in yml file. Always adds built-in templates.',
-    )
-
-    parser.add_argument(
-        '--include-built-in-templates',
-        dest='include_built_in_templates',
-        help='Include built-in templates.',
-        action="store_true",
-    )
-
-    parser.add_argument(
-        '--input-files', 
-        required=False, 
-        type=argparse.FileType('r'), 
-        nargs='+', 
-        help='File or directory to analyze.'
-    )
-    args = parser.parse_args()
-    if args.input_files and not args.output_name:
-        parser.error('You must set arg --output-name with arg --input-files')
-    return parser
+    logger.debug('******* Download PDFs ********')
+    for pdfId in settings['pdfIds']: 
+        downloaded_file = file_transfer.downloadFile(pdfId.strip(), settings['pdf_folder'], '.pdf')
+        try:
+            settings['input_files'].append(open(downloaded_file, 'r', encoding='utf-8'))
+        except OSError:
+            logger.fatal('Unable to open downloaded file', exc_info=True)
 
 
 def main(args=None):
     """Take folder or single file and analyze each."""    
     try:
-        if args is None:
-            parser = create_parser()
-            args = parser.parse_args()
+        finalData = FinalData.getInstance()
+        finalData.runningStatus = 'PREPARING_INPUTS'
 
-        if args.debug:
+        settings = getSettings()
+
+        # Set log level based on args
+        if settings['logLevelDebug']:
             logging.basicConfig(level=logging.DEBUG)
         else:
             logging.basicConfig(level=logging.INFO)
 
-        global envOutputModleApi
-        global envOutputColumn
-        global envTemplateIds
-        global envPdfIds
-        global finalData
-        logger.debug(f'template_folder : {args.template_folder},  envTemplateIds: {envTemplateIds}, input_files: {args.input_files}, envPdfId: {envPdfIds}')
-        assert args.template_folder or envTemplateIds, 'Please specify template folder using command line arg "--template-folder" \
-or provide attachment ids for template in the env variable "templates"'
-        assert args.input_files or envPdfIds, 'Please specify input file location  using command line arg "--input-files" \
-or provide attachment ids of the pdf in the env variable "pdfId"'
-        
+        if settings['isK8sJob']:
+            finalData.runningStatus = 'DOWNLOADING_FILES'
+            downloadFilesAndUpdatingSettings(settings)
 
-        input_module = input_mapping[args.input_reader]
-        output_module = output_mapping[args.output_format]
+        # *** Template loading start *** #
+        finalData.runningStatus = 'LOADING_TEMPLATES'
+        settings['templates'] += read_templates(settings['template_folder'])
 
-        templates = []
-        template_folder = ''
-        # Load templates from external folder if set.
-        if args.template_folder:
-            template_folder = os.path.abspath(args.template_folder)
-        elif len(envTemplateIds) != 0:
-            logger.debug('******* Download Templates ********')
-            template_folder = os.path.abspath('downloads/templates')
-            for templateId in envTemplateIds:
-                file_transfer.getTemplateFile(templateId.strip(), template_folder)        
-        
-        if template_folder:
-            templates += read_templates(template_folder)
+        if settings['include_built_in_templates']:
+            settings['templates'] += read_templates()
+        # *** Template loading End *** #
 
-        # Load internal templates, if enabled.
-        if args.include_built_in_templates:
-            templates += read_templates()
-        
-        
-        if args.input_files:
-            input_files = args.input_files
-        if envPdfIds:
-            # download PDF
-            logger.debug('******* Download PDFs ********')
-            input_files = []
-            for pdfId in envPdfIds:
-                downloadFolder = os.path.abspath('downloads/pdfs') 
-                downloaded_file = file_transfer.downloadFile(pdfId.strip(), downloadFolder, '.pdf')
-                try:
-                    input_files.append(open(downloaded_file, 'r', encoding='utf-8'))
-                except OSError:
-                    logger.fatal('Unable to open downloaded file', exc_info=True)
-
-        # process PDFs
+        # starting process PDFs
+        finalData.runningStatus = 'STARTING_PDF_PROCESSING'
         outputs = []
-        for f in input_files:
-            finalData['pdfId'] = os.path.basename(f.name).split('.')[0]
-            res = extract_data(f.name, templates=templates, input_module=input_module)
+        for f in settings['input_files']:
+            finalData.pdfId = os.path.basename(f.name).split('.')[0]
+            extract_data(f.name, templates=settings['templates'], input_module=input_mapping[settings['inputReader']])
             logger.info(finalData)
-            outputs.append(finalData)
-            if envOutputModleApi and envOutputColumn:
-                to_model.write_to_model(finalData, envOutputModleApi, envOutputColumn)
+            outputs.append(finalData.getFinalData())
+            if settings['isK8sJob']:
+                finalData.commitToDB()
             f.close()
             # reset the finalData    
-            finalData = {}
+            finalData.reset()
 
-        if output_module is not None and args.output_name:
-            output_module.write_to_file(outputs, args.output_name)
+        if not settings['isK8sJob']:
+            # for command line the output is written after processing all the files unlike in K8s job where 
+            # the output of each pdf processing is written right after the processing completes or is errored out.
+            output_module = output_mapping[settings['output_format']]
+            output_module.write_to_file(outputs, settings['outputFileName'])
+
+        finalData.runningStatus = 'PDF_PROCESSING_COMPLETED'
     except Exception as e:
-        updateStatus(exception=e)
+        finalData.updateStatus(exception=e)
         pass
 
 if __name__ == '__main__':

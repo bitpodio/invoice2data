@@ -95,4 +95,4 @@ def extract(self, content, pdfStatus):
                     pdfStatus['dbStatusCode'] = 300 if pdfStatus['dbStatusCode'] < 300 else pdfStatus['dbStatusCode'] 
 
     if lines:
-        output['multilines'] = lines
+        output['lines'] = lines

@@ -17,7 +17,7 @@ class FinalData:
     def __init__(self):
        """ Virtually private constructor. """
        if FinalData.__instance != None:
-           raise Exception("This class is a singlton class, please call the getInstance method to get the object!")
+           raise Exception("This class is a singleton class, please call the getInstance method to get the object!")
        else:
            self._runningStatus = 'NOT_YET_STARTED'
            self._statusCode = None
@@ -122,6 +122,7 @@ class FinalData:
         self._selectedTemplate = value
 
     def getFinalData(self):
+        '''Returns final data to be saved in db at any point in time as a dictionary.'''
         return {
             "statusCode": self._statusCode,
             "status": self._status,
@@ -155,6 +156,15 @@ class FinalData:
 
 
     def updateFinalDataFromPdfData(self, extractionDetails, optimized_str, selectedTemplate):
+        '''
+        Compares the current pass's results with previous pass (if previous pass data is available) and updates 
+        the FinalData if the current pass's results are better then previous pass.
+        Parameters:
+        -------------------------
+        extractionDetails - dictionary containing dbStatusCode, output and warnings.
+        optimized_str -  text on which the template ran.
+        selectedTemplate - template used for data extraction.
+        '''
         if (self._passNumber > 1) and self._statusCode and self._statusCode <= extractionDetails['dbStatusCode'] :
             if (self._statusCode == extractionDetails['dbStatusCode'] 
                 and self._statusCode == 320 # Processed with one or more missing lines.
@@ -194,6 +204,9 @@ class FinalData:
         return True
     
     def commitToDB(self):
+        '''
+        Commits the current FinalData to DB. You can only call this function once for a PDF. 
+        '''
         if not self._isCommited:
             self._runningStatus = 'COMMITING_FINAL_DATA'
             to_model.write_to_model(self.getFinalData(), self.__settings['outputModleApi'], self.__settings['outputColumn'])

@@ -72,3 +72,4 @@ ocr_job.yml
 invoice-output.json
 *.code-workspace
 *.prof
+node_modules/

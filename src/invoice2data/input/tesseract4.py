@@ -51,6 +51,7 @@ def to_text(path, language='eng', psm='6'):
                         '-c',
                         'quit',
                     ]
+                    # gs -q -dNOPAUSE -r600x600 -sDEVICE=tiff24nc -sOutputFile=test.tiff ./pdf.pdf -c quit
                     subprocess.Popen(gs_cmd)
                     time.sleep(3)
 
@@ -72,11 +73,14 @@ def to_text(path, language='eng', psm='6'):
                         '8',
                         'tiff:-',
                     ]
+                    # convert file.tiff -colorspace gray -type grayscale -contrast-stretch 0 -sharpen 0x1 -density  350 -depth  8 tiff:output.tiff
 
                     p1 = subprocess.Popen(magick_cmd, stdout=subprocess.PIPE)
 
                     # Step 3: read text from image
                     tess_cmd = ['tesseract', '-l', language, '--oem', '1', '--psm', psm, 'stdin', 'stdout']
+                    # tesseract -l eng --oem 1 --psm 6 stdin stdout
+
                     p2 = subprocess.Popen(tess_cmd, stdin=p1.stdout, stdout=subprocess.PIPE)
 
                     out, err = p2.communicate()

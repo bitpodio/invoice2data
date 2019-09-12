@@ -4,7 +4,8 @@ import codecs
 import requests
 import os
 from requests_aws4auth import  AWS4Auth
-import logging as logger
+import logging
+logger = logging.getLogger('__main__')
 
 def write_to_model(data, api, dataColumn):
     '''Writes the json data to given model. 

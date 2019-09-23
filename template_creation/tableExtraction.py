@@ -6,6 +6,10 @@ import re
 def prepareHeaderTemplate(template, fileText):
     with open('/Developer/bitpod/invoice2data/playground/db.yml', 'r') as f2:
         fieldRegex = yaml.load(f2)
+    # Adding blank values for keywords and issuer
+    template['keywords'] = []
+    template['issuer'] = ''
+
     for invoice_number in fieldRegex['invoice_numbers']:
         output = re.findall(invoice_number, fileText)
         if len(output) == 1:
@@ -98,6 +102,15 @@ def matchCurrentRow(line, rowNo, lineRegex, lastFieldRegex):
     return True if match else False
 
 def matchAndUpdateCurrentRegex(numberOfColumns, regexArray, regexRowToTest, dataArr, rowNo, tableRegex, columnTypes, linesDataArr):
+    '''
+    Given data and regex with data row number. This function check if there is already a matching regex line entry for that line or not.
+    **** parameters ****
+    ----------------------------------------------------------
+    numberOfColumns -  nnumber of columns in the table.
+    regexArray -  the current array of regex to match the with given row.
+    regexRowToTest - row number of the regex to test.
+    dataArr -  data array to test the regex against
+    '''
     doesRowMatch = True
     for columnNo in range(numberOfColumns):
         regex = regexArray[regexRowToTest][columnNo]
@@ -105,7 +118,8 @@ def matchAndUpdateCurrentRegex(numberOfColumns, regexArray, regexRowToTest, data
             assert (rowNo != 0 or columnNo != 0), 'We do not support auto template creation if first column of first row is blank.'
             if regex != '':
                 endOfNamedGroup = regex.rfind(')') + 1
-                if endOfNamedGroup == -1:
+                if endOfNamedGroup in [-1, 0]:
+                    doesRowMatch = False
                     print('Unable to find regex boundries.')
                 elif len(regex) - 1 >= endOfNamedGroup and regex[endOfNamedGroup] == '?':
                     continue
@@ -114,42 +128,76 @@ def matchAndUpdateCurrentRegex(numberOfColumns, regexArray, regexRowToTest, data
             continue
         elif regexRowToTest == 0:
             # If the value is not blank
-            match = re.search(regex + "\\s*", dataArr[rowNo][columnNo])
-            if not match:
-                # find another one that fits all
-                newRegex = ''
-                for regex2 in tableRegex[columnTypes[columnNo]]:
-                    count = 0
-                    for line in linesDataArr:
-                        isMatch = re.search(regex2, line[columnNo])
-                        if isMatch:
-                            count += 1
-                    if count == len(linesDataArr):
-                        newRegex = regex2
-                        break
-                if newRegex == '':
-                    print(f'Unable to find regex for {dataArr[rowNo][columnNo]}, column type {columnTypes[columnNo]}.')
-                    doesRowMatch = False
-                    break
-                else:
-                    #check if previous regex was optional
-                    endOfNamedGroup = regex.rfind(')') + 1
-                    if endOfNamedGroup == -1:
+            if regex == '':
+                # find new regex for this column
+                for regex2 in tableRegex[columnTypes[columnNo]]: # search regex for current column type based on table header
+                    match = re.search(regex2 + "\\s*", dataArr[rowNo][columnNo])
+                    if match:
+                        currentLineRegex = []
+                        for i in range(columnNo):
+                            currentLineRegex.append(regexArray[regexRowToTest][i])
+                        if matchCurrentRow(dataArr[rowNo], columnNo, currentLineRegex, regex2):
+                            break
+                        else:
+                            match = False
+                            continue
+                if match:
+                    endOfNamedGroup = regex2.rfind(')') + 1
+                    if endOfNamedGroup in [-1, 0]:
+                        doesRowMatch = False
                         print('Unable to find regex boundries.')
-                        continue
-                    elif len(regex) - 1 >= endOfNamedGroup and regex[endOfNamedGroup] == '?':
-                        endOfNamedGroup = newRegex.rfind(')') + 1
-                        regexArray[regexRowToTest][columnNo] = newRegex[:endOfNamedGroup] + '?' + newRegex[endOfNamedGroup:]
+                    elif len(regex2) - 1 >= endOfNamedGroup and regex2[endOfNamedGroup] == '?':
+                        regexArray[regexRowToTest][columnNo] = regex2
                     else:
-                        regexArray[regexRowToTest][columnNo] = newRegex
-            if doesRowMatch:
-                continue
+                        regexArray[regexRowToTest][columnNo] = regex2[:endOfNamedGroup] + '?' + regex2[endOfNamedGroup:]
+                else:
+                    raise Exception(f'Unable to find regex for {dataArr[rowNo][columnNo]}')
             else:
-                break
+                match = re.search(regex + "\\s*", dataArr[rowNo][columnNo])
+                if not match:
+                    # find another one that fits all
+                    newRegex = ''
+                    for regex2 in tableRegex[columnTypes[columnNo]]:
+                        count = 0
+                        for line in linesDataArr:
+                            isMatch = re.search(regex2, line[columnNo])
+                            if isMatch:
+                                currentLineRegex = []
+                                for i in range(columnNo):
+                                    currentLineRegex.append(regexArray[regexRowToTest][i])
+                                if matchCurrentRow(dataArr[rowNo], columnNo, currentLineRegex, regex2):
+                                    count += 1
+                                    continue
+                                else:
+                                    isMatch = False
+                                    continue
+                        if count == len(linesDataArr):
+                            newRegex = regex2
+                            break
+                    if newRegex == '':
+                        print(f'Unable to find regex for {dataArr[rowNo][columnNo]}, column type {columnTypes[columnNo]}.')
+                        doesRowMatch = False
+                        break
+                    else:
+                        #check if previous regex was optional
+                        endOfNamedGroup = regex.rfind(')') + 1
+                        if endOfNamedGroup in [-1, 0]:
+                            print('Unable to find regex boundries.')
+                            doesRowMatch = False
+                            continue
+                        elif len(regex) - 1 >= endOfNamedGroup and regex[endOfNamedGroup] == '?':
+                            endOfNamedGroup = newRegex.rfind(')') + 1
+                            regexArray[regexRowToTest][columnNo] = newRegex[:endOfNamedGroup] + '?' + newRegex[endOfNamedGroup:]
+                        else:
+                            regexArray[regexRowToTest][columnNo] = newRegex
+                if doesRowMatch:
+                    continue
+                else:
+                    break
         else:
             match = re.search(regex + "\\s*", dataArr[rowNo][columnNo])
             if not match:
-                print(f'Unable to find regex for {dataArr[rowNo][columnNo]}, column type {columnTypes[columnNo]}.')
+                print(f'Unable to find regex for {dataArr[rowNo][columnNo]}, column type {columnTypes[columnNo]}, regex {regex}.')
                 doesRowMatch = False
                 break
             continue
@@ -166,12 +214,17 @@ def prepareTableTemplate(template, fileText):
         if start:
             print(f'Table start regex found; {startRegex}')
             template['multilines']['start'] = startRegex
+            break
 
     for endRegex in tableRegex['Table_End']:
         end = re.search(endRegex, fileText)
         if end:
             print(f'Table end regex found; {endRegex}')
             template['multilines']['end'] = endRegex
+            break
+
+    assert end, "Unablet to find end of the table."
+    assert start, "Unable to find start of the table."
 
     tableText = fileText[start.end(): end.start()]
     assert tableText, "Unable to find table body b/w start and end regex. One of the regex could be wrong."
@@ -234,10 +287,11 @@ def prepareTableTemplate(template, fileText):
     for rowNo in range(len(dataArr)):
         currentLineRegex = []
         match = False
+        # If this is first row of the table then we simply keep appending the regexs to current regex array for each column for first row in order.
         if rowNo == 0:
             for columnNo in range(numberOfColumns):
                 if dataArr[rowNo][columnNo].strip() == "": # if current column value is blank
-                    assert columnNo == 0, 'We do not support auto template creation if first column of first row is blank.'
+                    assert columnNo != 0, 'We do not support auto template creation if first column of first row is blank.'
                     currentLineRegex.append('')
                     continue
                 for regex in tableRegex[columnTypes[columnNo]]: # search regex for current column type based on table header
@@ -251,7 +305,10 @@ def prepareTableTemplate(template, fileText):
                 if match:
                     currentLineRegex.append(regex)
                 else:
-                    raise Exception(f'Unable to find regex for {dataArr[rowNo][columnNo]}')
+                    raise Exception(f'Unable to find regex for {dataArr[rowNo][columnNo]}. Column type - {columnTypes[columnNo]}')
+        # If this is not first row of the tables but the first row of a multiline entry.
+        # We simply match it with first row. If something is missing we make that optional in first_row regex.
+        # If there is any column which does not match with corresponding first row column then throw an error.  
         elif rowNo != 0 and re.search(regexArray[0][0], dataArr[rowNo][0]): 
             firstLineArr.append(dataArr[rowNo])
             isMatch = matchAndUpdateCurrentRegex(numberOfColumns, regexArray, 0, dataArr, rowNo, tableRegex, columnTypes, firstLineArr)
@@ -261,12 +318,14 @@ def prepareTableTemplate(template, fileText):
             isMatch = False
             if regexArray[1:] != []:
                 for i in range(1,len(regexArray)):
+                    if regexArray[i] == []:
+                        continue
                     isMatch = matchAndUpdateCurrentRegex(numberOfColumns, regexArray, i, dataArr, rowNo, tableRegex, columnTypes, otherLineArr)
                     if isMatch:
                         break
                 if isMatch:
                     continue
-                
+            print(f'No previously matching regex lines found for *{dataArr[rowNo]}*')
             for columnNo in range(numberOfColumns):
                 if dataArr[rowNo][columnNo].strip() == "": # if current column value is blank
                     currentLineRegex.append('')
@@ -283,7 +342,7 @@ def prepareTableTemplate(template, fileText):
                     currentLineRegex.append(regex)
                 else:
                     print(f'Unable to find regex for {dataArr[rowNo][columnNo]}, so skipping this value.')
-                    currentLineRegex.append(regex)
+                    currentLineRegex.append(dataArr[rowNo][columnNo])
                 
             print(dataArr[rowNo][columnNo])
         regexArray.append(currentLineRegex)
@@ -302,14 +361,14 @@ def prepareTableTemplate(template, fileText):
             tempLineRegex = '\\s+'.join(lineRegex)
             tempLineRegex = '^\\s*' + tempLineRegex + '$'
             template['multilines']['line'].append(tempLineRegex)
-    print(template)
+    return template
 
 
 
 
 
 
-newFile = '/Developer/bitpod/pythonProject/mountedLocation/pdfs/Privider_Invoice_Samples/PROV003887_Hallmark Workplace Solutions/181205_Admin.pdf.txt'
+newFile = '/Developer/bitpod/pythonProject/mountedLocation/pdfs/Privider_Invoice_Samples/SDN Childrens Services/N00015440A_SM11330_Admin.pdf.txt'
 fileText = ''
 fileName = newFile.split('/')[-1]
 print(f'Preparing template for {fileName}.')
@@ -322,60 +381,7 @@ template['multilines'] = {}
 
 template = prepareHeaderTemplate(template, fileText)
 
-prepareTableTemplate(template, fileText)
+template = prepareTableTemplate(template, fileText)
 
-# rowNumber = 0
-# firstLineRegex = ''
-# for line in lines:
-#     print('*'+line+'*')
-#     if (rowNumber == 1 and firstLineRegex != ''):
-#         firstLineRegex = currentRegex
-#         match = re.search(firstLineRegex, line)
-#         if match:
-#             tempRow = {
-#                         field: value.strip() if value else ''
-#                         for field, value in match.groupdict().items()
-#                     }
-#             print('Found match for this line so skipping template creation. \n Data :')
-#             print(tempRow)
-
-#     currentRegex = '^\\s*'
-#     currentLineData = {}
-#     if 'n' == input('Do you want to write regex for this lines? (y/n)'):
-#         continue
-#     foundRegxForCurrentColumn = False
-#     rowNumber += 1
-#     if rowNumber != 1:
-#         response = input('Is this a new data row? (y/n)')
-#         isNewRow = True if response == 'y' else False
-#     for i in range(numberOfColumns):
-#         assert i == 0 or foundRegxForCurrentColumn or dataType == 'skip', f'Unable to find regex for {dataType}. Pass this to developer.'
-#         dataType = input(f'Enter the type of the column no. {i+1} (type "skip" to skip this column for this line):')
-#         if dataType == 'skip':
-#             continue
-#         assert dataType in tableRegex, f'Unable to find regex for {dataType}. Pass this to developer.'
-
-#         for regex in tableRegex[dataType]:
-#             if i == 0:
-#                 tempRegex = currentRegex + regex
-#             else:
-#                 tempRegex = currentRegex + "\\s+" + regex
-
-#             match = re.search(tempRegex, line)
-#             foundRegxForCurrentColumn = False
-#             if match:
-#                 tempRow = {}
-#                 for field, value in match.groupdict().items():
-#                     lastKey = field
-#                     lastValue = value.strip()
-#                     tempRow[field] = value.strip() if value else ''
-#                 if len(tempRow.keys()) > len(currentLineData.keys()):
-#                     if 'n' == input(f'Column name - {lastKey}, column value - {lastValue}. Are the key-value correct? (y/n):'):
-#                         continue
-#                     currentRegex = tempRegex
-#                     currentLineData = tempRow 
-#                     if i == numberOfColumns - 1:
-#                         currentRegex = currentRegex +'$'
-#                     print(f'Found regex for {dataType} - {regex}. \n Current regex is {currentRegex} .')
-#                     foundRegxForCurrentColumn = True
-#                     break
+with open('/Developer/bitpod/invoice2data/playground/templates/test.yml', 'w+') as outfile:
+    yaml.dump(template, outfile, default_flow_style=False)

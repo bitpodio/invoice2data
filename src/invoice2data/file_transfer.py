@@ -16,8 +16,8 @@ try:
     templateFieldName = os.environ['templateFieldName']
     auth = AWS4Auth(accessKeyId, secretAccessKey, 'eu-west-1', 's3')
 except KeyError as e:
-    logger.error(f'Please set env variable {e.args[0]}')
-    sys.exit(1)
+    logger.warning(f'Please set env variable {e.args[0]}')
+    #sys.exit(1)
 
 def uploadFile(filePath):
     '''Uploads the file to the attachment model and returns the attachment id'''    

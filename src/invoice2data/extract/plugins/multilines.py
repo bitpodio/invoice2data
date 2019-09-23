@@ -37,6 +37,15 @@ def extract(self, content, pdfStatus):
     if 'line' not in self['multilines']:
         logger.warning('Multilines line regex is missing in the template.')
     
+    lineGroupHeader = None
+    groupHeaderName = None
+    groupHeaderValue = None
+    # line_group_header is the group heading like service name for next few lines or provider name for next few lines. see the e.g. 
+    # Date           Units      Item          Description                                                              Fee                   Total
+    # Mohammad Sabbagh - Provider # 5452981K
+    # 20-11-2018       1        600       NDIS Participant 1 hour                                                    $179.26                $179.26
+    if 'line_group_header' in self['multilines']:
+        lineGroupHeader = self['multilines']['line_group_header']
     start = re.search(self['multilines']['start'], content)
     end = re.search(self['multilines']['end'], content)
     if not start or not end:
@@ -51,10 +60,22 @@ def extract(self, content, pdfStatus):
         if not line.strip('').strip('\n') or not line:
             continue
 
+        if lineGroupHeader:
+            match = re.search(lineGroupHeader, line)
+            if match:
+                for field, value in match.groupdict().items():
+                    if field and value:
+                        groupHeaderName = field
+                        groupHeaderValue = value
+                continue
+            
+
         # match the first line
         match = re.search(self['multilines']['first_line'], line)
         if match:
             if current_row:
+                if groupHeaderName and groupHeaderValue: # adding the line group header value
+                    current_row[groupHeaderName] = groupHeaderValue
                 lines.append(current_row) # commit the last row
             current_row = {} #start with a new row
             current_row = {
@@ -82,6 +103,8 @@ def extract(self, content, pdfStatus):
         pdfStatus['dbStatusCode'] = 320 if pdfStatus['dbStatusCode'] < 320 else pdfStatus['dbStatusCode']
 
     if current_row: # This for the last line in the table
+        if groupHeaderName and groupHeaderValue: # adding the line group header value
+            current_row[groupHeaderName] = groupHeaderValue
         lines.append(current_row)
 
     types = self['multilines'].get('types', [])

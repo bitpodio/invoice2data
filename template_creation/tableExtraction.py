@@ -284,11 +284,19 @@ def prepareTableTemplate(template, fileText):
     isFirstLine = False
     firstLineArr = []
     otherLineArr = []
+    hasLineGroup = False
     for rowNo in range(len(dataArr)):
         currentLineRegex = []
         match = False
         # If this is first row of the table then we simply keep appending the regexs to current regex array for each column for first row in order.
-        if rowNo == 0:
+        if rowNo == 0 or (rowNo == 1 & hasLineGroup):
+            for regex in tableRegex['line_group_header']:
+                match = re.search(regex + "\\s*", dataArr[rowNo][columnNo])
+                if match:
+                    template['multilines']['line_group_header'] = regex
+                    hasLineGroup = True
+                    break
+            firstLineArr.append(dataArr[rowNo])
             for columnNo in range(numberOfColumns):
                 if dataArr[rowNo][columnNo].strip() == "": # if current column value is blank
                     assert columnNo != 0, 'We do not support auto template creation if first column of first row is blank.'
@@ -310,6 +318,13 @@ def prepareTableTemplate(template, fileText):
         # We simply match it with first row. If something is missing we make that optional in first_row regex.
         # If there is any column which does not match with corresponding first row column then throw an error.  
         elif rowNo != 0 and re.search(regexArray[0][0], dataArr[rowNo][0]): 
+            for regex in tableRegex['line_group_header']:
+                    match = re.search(regex + "\\s*", dataArr[rowNo][columnNo])
+                    if match:
+                        template['multilines']['line_group_header'] = regex
+                        hasLineGroup = True
+                        isMatch = True
+                        break
             firstLineArr.append(dataArr[rowNo])
             isMatch = matchAndUpdateCurrentRegex(numberOfColumns, regexArray, 0, dataArr, rowNo, tableRegex, columnTypes, firstLineArr)
             assert isMatch, 'Unable to find regex for first line.'
@@ -326,6 +341,17 @@ def prepareTableTemplate(template, fileText):
                 if isMatch:
                     continue
             print(f'No previously matching regex lines found for *{dataArr[rowNo]}*')
+
+            for regex in tableRegex['line_group_header']:
+                match = re.search(regex + "\\s*", dataArr[rowNo][columnNo])
+                if match:
+                    template['multilines']['line_group_header'] = regex
+                    hasLineGroup = True
+                    isMatch = True
+                    break
+            if isMatch:
+                continue
+
             for columnNo in range(numberOfColumns):
                 if dataArr[rowNo][columnNo].strip() == "": # if current column value is blank
                     currentLineRegex.append('')
@@ -368,7 +394,7 @@ def prepareTableTemplate(template, fileText):
 
 
 
-newFile = '/Developer/bitpod/pythonProject/mountedLocation/pdfs/Privider_Invoice_Samples/SDN Childrens Services/N00015440A_SM11330_Admin.pdf.txt'
+newFile = '/Developer/bitpod/pythonProject/mountedLocation/pdfs/Privider_Invoice_Samples/PhysioInteractive/0f1_arinvd52_FFS3_Admin.pdf.txt'
 fileText = ''
 fileName = newFile.split('/')[-1]
 print(f'Preparing template for {fileName}.')

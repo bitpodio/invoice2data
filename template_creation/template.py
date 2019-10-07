@@ -10,22 +10,9 @@ class Template:
         self._line = []
         self._types = {}
         self._line_group_header = ""
-        self._remove_whitespace = "false"
+        self._remove_whitespace = False
         self._currency = "AUD"
         self._date_formats = []
-        self._multiline = {
-            "start": self._tableStart,
-            "end": self._tableEnd,
-            "first_line": self._tableFirstLine ,
-            "line": self._line,
-            "types": self._types,
-            "line_group_header": self._line_group_header 
-            }
-        self.__options = {
-            "remove_whitespace": self._remove_whitespace,
-            "currency": self._currency,
-            "date_formats": self._date_formats
-        }
 
     @property
     def issuer(self):
@@ -59,15 +46,6 @@ class Template:
             self._fields.update(value)
         else:
             raise ValueError('Fields must be a dictionary.')
-
-    
-    @property
-    def multiline(self):
-        return self._multiline
-
-    @property
-    def options(self):
-        return self.__options
 
     @property
     def tableStart(self):
@@ -163,3 +141,25 @@ class Template:
             self._date_formats += value
         else:
             raise ValueError('date_formats must be a list or a string')
+    
+    def getTemplateDict(self):
+        '''
+        returns template as dict.
+        '''
+        return {
+            "issuer": self.issuer,
+            "keywords": self.keywords,
+            "fields": self.fields,
+            "multilines": {
+                "start": self.tableStart,
+                "end": self.tableEnd,
+                "first_line": self.tableFirstLine ,
+                "line": self.line,
+                "types": self.types,
+                "line_group_header": self.line_group_header 
+                },
+            "options": {
+                "currency": self.currency,
+                "date_formats": self.date_formats
+                }
+        }

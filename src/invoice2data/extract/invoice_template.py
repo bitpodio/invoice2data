@@ -59,7 +59,7 @@ class InvoiceTemplate(OrderedDict):
             self.options.update(self['options'])
 
         # Set issuer, if it doesn't exist.
-        if 'issuer' not in self.keys():
+        if 'issuer' not in self.keys() and len(self['keywords']) > 0:
             self['issuer'] = self['keywords'][0]
 
     def prepare_input(self, extracted_str):
@@ -90,8 +90,10 @@ class InvoiceTemplate(OrderedDict):
 
     def matches_input(self, optimized_str):
         """See if string matches keywords set in template file"""
-
-        if all([keyword in optimized_str for keyword in self['keywords']]):
+        if len(self['keywords']) == 0:
+            logger.debug('No keywords are specified. Will try all templates.')
+            return True
+        elif all([keyword in optimized_str for keyword in self['keywords']]):
             logger.debug('Matched template %s', self['template_name'])
             return True
 

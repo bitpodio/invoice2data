@@ -89,10 +89,10 @@ def read_templates(folder=None):
                 tpl['template_name'] = name
 
                 # Test if all required fields are in template:
-                assert 'keywords' in tpl.keys(), 'Missing keywords field.'
+                # assert 'keywords' in tpl.keys(), 'Missing keywords field.'
 
                 # Keywords as list, if only one.
-                if type(tpl['keywords']) is not list:
+                if 'keywords' in tpl.keys() and type(tpl['keywords']) is not list:
                     tpl['keywords'] = [tpl['keywords']]
 
                 output.append(InvoiceTemplate(tpl))

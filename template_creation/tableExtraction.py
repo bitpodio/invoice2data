@@ -281,7 +281,6 @@ def prepareTableTemplate(template, fileText):
     # other column's regexs can be improved 
 
     regexArray = []
-    isFirstLine = False
     firstLineArr = []
     otherLineArr = []
     hasLineGroup = False
